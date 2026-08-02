@@ -282,23 +282,28 @@ menu2 = function(){
 			window.addEventListener('deviceorientation', reactOrientation);
 		}
 	}
-	if(document.getElementById("name").value == "")
+	var nameEl = document.getElementById("name");
+	if(!nameEl || nameEl.value == "")
 		name = "Jugador sin nombre";
 	else
-		name = document.getElementById("name").value;
+		name = nameEl.value;
 	VR = document.getElementById("cardboard").className == "tools sel";
 	transitionMenu(
 		"<div class='menuitem title button menu-top' id='solo' ontouchstart='this.click()' onclick='soloMenu()'>Jugar en solitario</div>" +
 		"<div class='menuitem title button menu-bottom' id='friends' ontouchstart='this.click()' onclick='friendsMenu()'>Jugar con amigos</div>",
 		function(){
-			document.getElementById("solo").style.transform = "none";
+			var soloEl = document.getElementById("solo");
+			if(soloEl) soloEl.style.transform = "none";
 			setTimeout(function(){
-				document.getElementById("solo").style.transition = "transform .2s, box-shadow .2s";
+				var el = document.getElementById("solo");
+				if(el) el.style.transition = "transform .2s, box-shadow .2s";
 			}, 500);
 			setTimeout(function(){
-				document.getElementById("friends").style.transform = "none";
+				var friendsEl = document.getElementById("friends");
+				if(friendsEl) friendsEl.style.transform = "none";
 				setTimeout(function(){
-					document.getElementById("friends").style.transition = "transform .2s, box-shadow .2s";
+					var el = document.getElementById("friends");
+					if(el) el.style.transition = "transform .2s, box-shadow .2s";
 				}, 500);
 			}, 500);
 		}
@@ -401,9 +406,9 @@ friendsMenu = function(){
 		"<div class='menuitem title button menu-bottom' id='join' ontouchstart='this.click()' onclick='joinGame()'>Unirse a una sala</div>" +
 		"<div class='menuitem title button menu-back' id='friendsback' ontouchstart='this.click()' onclick='menu2()'>Volver</div>",
 		function(){
-			setTimeout(function(){ document.getElementById("host").style.transform = "none"; setTimeout(function(){ document.getElementById("host").style.transition = "transform .2s, box-shadow .2s"; }, 500); }, 200);
-			setTimeout(function(){ document.getElementById("join").style.transform = "none"; setTimeout(function(){ document.getElementById("join").style.transition = "transform .2s, box-shadow .2s"; }, 500); }, 700);
-			setTimeout(function(){ document.getElementById("friendsback").style.transform = "none"; }, 1200);
+			setTimeout(function(){ var el = document.getElementById("host"); if(el){ el.style.transform = "none"; setTimeout(function(){ if(el) el.style.transition = "transform .2s, box-shadow .2s"; }, 500); } }, 200);
+			setTimeout(function(){ var el = document.getElementById("join"); if(el){ el.style.transform = "none"; setTimeout(function(){ if(el) el.style.transition = "transform .2s, box-shadow .2s"; }, 500); } }, 700);
+			setTimeout(function(){ var el = document.getElementById("friendsback"); if(el) el.style.transform = "none"; }, 1200);
 		}
 	);
 }
@@ -435,11 +440,12 @@ hostCreateCustom = function(){
 	lobbyMapType = "custom";
 	transitionMenu(
 		"<div class='menuitem title' id='custommap-title'>Pega los datos del mapa</div>" +
-		"<div class='menuitem title'><textarea id='mapdata' class='title' ontouchstart='this.focus()' placeholder='Pega aqu\u00ed los n\u00fameros/export del mapa'></textarea></div>" +
-		"<div class='menuitem title button' id='mapstart' ontouchstart='this.click()' onclick='hostCreateCustomGo()'>Continuar</div>" +
+		"<div class='menuitem title' id='mapdata-wrap'><textarea id='mapdata' class='title' ontouchstart='this.focus()' placeholder='Pega aqu\u00ed los n\u00fameros/export del mapa'></textarea></div>" +
+		"<div class='menuitem title button menu-bottom' id='mapstart' ontouchstart='this.click()' onclick='hostCreateCustomGo()'>Continuar</div>" +
 		"<div class='menuitem title button menu-back' id='mapback2' ontouchstart='this.click()' onclick='friendsMenu()'>Volver</div>",
 		function(){
 			setTimeout(function(){ var el = document.getElementById("custommap-title"); if(el) el.style.transform = "none"; }, 100);
+			setTimeout(function(){ var el = document.getElementById("mapdata-wrap"); if(el) el.style.transform = "none"; }, 250);
 			setTimeout(function(){ var el = document.getElementById("mapstart"); if(el) el.style.transform = "none"; }, 400);
 			setTimeout(function(){ var el = document.getElementById("mapback2"); if(el) el.style.transform = "none"; }, 700);
 		}
@@ -695,6 +701,7 @@ joinGame = function(){
 		"<input id='incode' class='title' onkeyup='codeCheck(event)' ontouchstart='this.focus()' maxlength='5' autofocus></input>" +
 		"<div class='menuitem title button menu-back' id='joinback' ontouchstart='this.click()' onclick='friendsMenu()'>Volver</div>",
 		function(){
+			f.appendChild(element);
 			var ic = document.getElementById("incode");
 			if(ic) ic.focus();
 			setTimeout(function(){ var el = document.getElementById("joinback"); if(el) el.style.transform = "none"; }, 300);
@@ -703,7 +710,7 @@ joinGame = function(){
 	join();
 }
 
-var map, trees, signs, startc, main;
+var map, trees, signs, startc, main, joined = false;
 
 // --- Solo mode setup --------------------------------------------------
 // Builds a fake `me.ref` and a fake `players` entry so the existing
@@ -728,6 +735,7 @@ startSoloGame = function(){
 		},
 		model: new THREE.Mesh(new THREE.BoxBufferGeometry(1, 1, 2))
 	};
+	me.data = players[myId].data;
 	var pl = players[myId];
 	pl.model.position.set(pl.data.x, 0.6, pl.data.y);
 	pl.model.material = new THREE.MeshLambertMaterial({color: new THREE.Color("hsl(" + pl.data.color + ", 100%, 50%)")});
@@ -795,6 +803,7 @@ startSoloGame = function(){
 };
 
 function deleteMap(){
+	if(!map) return;
 	while(map.children.length > 0)
 		map.remove(map.children[0]);
 	scene.remove(map);
@@ -1166,7 +1175,10 @@ function enterResultsMode(){
 }
 
 function join(){
+	if(map) deleteMap();
 	eval(loadMap());
+	if(joined) return;
+	joined = true;
 
 	scene.background = new THREE.Color(0x7fb0ff);
 
@@ -1508,7 +1520,7 @@ function join(){
 
 			if(typeof me.ref.set == "function" && !soloMode) me.ref.set(me.data);
 
-			if(lap) lap.innerHTML = me.data.lap <= LAPS && soloMode != "entreno" ? me.data.lap + "/" + LAPS : "";
+			if(lap) lap.innerHTML = me.data.lap <= LAPS && soloMode != "entreno" ? Math.max(1, me.data.lap) + "/" + LAPS : "";
 
 			if(raceTimerEl && soloMode != "entreno"){
 				if(me.data.finishedPlace > 0 && me.data.finishTime != null){

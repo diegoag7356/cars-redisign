@@ -9,6 +9,15 @@ Original prompt: quiero que a darle start en la primera pantalla te pida elegir 
 - Añadido lobby con lista de jugadores y estado `Estoy listo`; el anfitrión arranca automáticamente cuando todos están listos.
 - Españolizados textos visibles principales y actualizado `README.md` con atribución al fork de `jchabin/cars`.
 
+## 2026-08-02 (fixes de bugs)
+
+- Botones de menú encimados: las clases `menu-top`/`menu-bottom`/`menu-back` no existían en CSS y todos los botones `.button` (position:absolute sin `top`) caían en la misma posición. Añadidas sus posiciones y quitados los `top` de `#host`/`#join` que entraban en conflicto en el menú de amigos.
+- Botón "Volver" que a veces no funcionaba: `menu2()` crasheaba al leer `document.getElementById("name").value` cuando el input inicial ya no existe (se navegaba desde submenús). Ahora hay guard de null.
+- Modo Cronometraje no conducía: `startSoloGame()` nunca asignaba `me.data`, y el bucle de render hacía `players["me"].data = me.data` (objeto vacío `{}`) → física con NaN. Ahora `me.data` apunta a los datos del jugador. Además el display de vueltas usa `Math.max(1, me.data.lap)` para mostrar 1/3 al arrancar (se mantuvo `lap: 0` internamente, consistente con multijugador).
+- `join()` ahora es idempotente (flag `joined`) para no duplicar mapas/cámaras/bucles de render al navegar entre menús; `deleteMap()` tiene guard si el mapa no existe.
+- Pantalla de mapa personalizado: el textarea no tenía animación de entrada (quedaba fuera de pantalla) y el botón Continuar no tenía posición. Se añadieron `id` y clase de posición.
+- Guards de null en timers de animación de `menu2()` y `friendsMenu()`.
+
 ## TODO
 
 - Validar en navegador con Firebase real que dos pestañas sincronizan `ready` y arranque.

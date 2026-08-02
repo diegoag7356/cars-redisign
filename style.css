@@ -283,7 +283,6 @@ input{
 	box-shadow: 0 0.5vmin 1vmin rgba(0, 0, 0, 0.5);
 }
 #host{
-	top: calc(30vh - 8vmin);
 	-webkit-transform: translate3d(-100vw, 0, 0);
 	        transform: translate3d(-100vw, 0, 0);
 	transition: box-shadow .2s, -webkit-transform .5s ease-out;
@@ -293,7 +292,6 @@ input{
 /* 	animation: slideleft 1s -0.5s ease-out forwards; */
 }
 #join{
-	top: calc(70vh - 8vmin);
 	-webkit-transform: translate3d(-100vw, 0, 0);
 	        transform: translate3d(-100vw, 0, 0);
 	transition: box-shadow .2s, -webkit-transform .5s ease-out;
@@ -301,6 +299,15 @@ input{
 	transition: transform .5s ease-out, box-shadow .2s, -webkit-transform .5s ease-out;
 /* 	-webkit-transform-style: preserve-3d; */
 /* 	animation: slideleft 1s ease-out forwards; */
+}
+.menu-top{
+	top: calc(25vh - 8vmin);
+}
+.menu-bottom{
+	top: calc(52vh - 8vmin);
+}
+.menu-back{
+	top: calc(80vh - 8vmin);
 }
 .info{
 	position: absolute;
