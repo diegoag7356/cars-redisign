@@ -9,6 +9,8 @@ var WALL_SIZE = 1.2;
 var MOUNTAIN_DIST = 250;
 var OOB_DIST = 200;
 var LAPS = 3;
+var soloLaps = 3;
+var soloMode = null;
 function MODS(){
 
 }
@@ -226,6 +228,7 @@ function toggleFullScreen() {
 }
 
 var name, code, players = {}, me = {}, gameStarted = false, gameSortaStarted = false, left = false, right = false, lap, leaderboard;
+var lobbyMapType = "preset", lobbyMapData = null, lobbyIsCustom = false, lobbyAllReady = false, lobbyIsHost = false, hostedRaceStarted = false, soloMode = null;
 var finishBanner, finishBannerQueue = [], finishBannerShowing = false, announcedFinishes = {};
 var myFinishTime = null, spectating = false, spectateIds = [], spectateIndex = 0;
 var spectatorUI, spectatorArrows, eyeBadge, eyeCountListenerRef = null, mySpectateTargetId = null;
@@ -269,206 +272,527 @@ menu2 = function(){
 		}
 
 		if(DeviceOrientationEvent.requestPermission){
-			DeviceOrientationEvent.requestPermission("The game needs to access phone tilt so you can steer your car.").then(permissionState => {
+			DeviceOrientationEvent.requestPermission("El juego necesita acceder a la inclinaci\u00f3n del tel\u00e9fono para que puedas dirigir tu coche.").then(permissionState => {
 				if (permissionState === 'granted')
 					window.addEventListener('deviceorientation', reactOrientation);
 				else
-					alert("Permission denied");
+					alert("Permiso denegado");
 			}).catch(alert);
     		}else{
 			window.addEventListener('deviceorientation', reactOrientation);
 		}
 	}
 	if(document.getElementById("name").value == "")
-		name = "Nerd with No Name";
+		name = "Jugador sin nombre";
 	else
 		name = document.getElementById("name").value;
 	VR = document.getElementById("cardboard").className == "tools sel";
+	transitionMenu(
+		"<div class='menuitem title button menu-top' id='solo' ontouchstart='this.click()' onclick='soloMenu()'>Jugar en solitario</div>" +
+		"<div class='menuitem title button menu-bottom' id='friends' ontouchstart='this.click()' onclick='friendsMenu()'>Jugar con amigos</div>",
+		function(){
+			document.getElementById("solo").style.transform = "none";
+			setTimeout(function(){
+				document.getElementById("solo").style.transition = "transform .2s, box-shadow .2s";
+			}, 500);
+			setTimeout(function(){
+				document.getElementById("friends").style.transform = "none";
+				setTimeout(function(){
+					document.getElementById("friends").style.transition = "transform .2s, box-shadow .2s";
+				}, 500);
+			}, 500);
+		}
+	);
+}
+
+function escapeHtml(text){
+	return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Helper: replaces the #fore contents with a slide transition.
+// `html` is the new innerHTML; `after` is called once the slide-in finishes.
+function transitionMenu(html, after){
 	f.style.transform = "translate3d(0, -100vh, 0)";
 	setTimeout(function(){
-		f.innerHTML = "<div class='menuitem title button' id='host' ontouchstart='this.click()' onclick='host()'>Host a game</div><div class='menuitem title button' ontouchstart='this.click()' id='join' onclick='joinGame()'>Join a game</div>";
+		f.innerHTML = html;
+		if(VR)
+			f.innerHTML += "<div id='divider'></div>";
 		f.style.transform = "none";
-		setTimeout(function(){
-			document.getElementById("host").style.transform = "none";
-			setTimeout(function(){
-				document.getElementById("host").style.transition = "transform .2s, box-shadow .2s";
-			}, 500);
-		}, 500);
-		setTimeout(function(){
-			document.getElementById("join").style.transform = "none";
-			setTimeout(function(){
-				document.getElementById("join").style.transition = "transform .2s, box-shadow .2s";
-			}, 500);
-		}, 1000);
+		if(typeof after == "function")
+			after();
 	}, 500);
+}
+
+// ---- Solo mode menu: Cronometraje / Entrenamiento -----------------
+soloMenu = function(){
+	transitionMenu(
+		"<div class='menuitem title' id='solomenu-title'>Elige el modo de juego</div>" +
+		"<div class='menuitem title button menu-top' id='crono' ontouchstart='this.click()' onclick='soloCrono()'>Cronometraje</div>" +
+		"<div class='menuitem title button menu-bottom' id='entren' ontouchstart='this.click()' onclick='soloEntreno()'>Entrenamiento</div>" +
+		"<div class='menuitem title button menu-back' id='soloback' ontouchstart='this.click()' onclick='menu2()'>Volver</div>",
+		function(){
+			setTimeout(function(){ var el = document.getElementById("solomenu-title"); if(el) el.style.transform = "none"; }, 100);
+			setTimeout(function(){ var el = document.getElementById("crono"); if(el) el.style.transform = "none"; }, 400);
+			setTimeout(function(){ var el = document.getElementById("entren"); if(el) el.style.transform = "none"; }, 700);
+			setTimeout(function(){ var el = document.getElementById("soloback"); if(el) el.style.transform = "none"; }, 1000);
+		}
+	);
+}
+
+// Solo "Entrenamiento": free drive, no countdown, no timer, no laps, no leaderboard.
+soloEntreno = function(){
+	soloMode = "entreno";
+	// Entrenamiento: infinite laps internally (so the lap counter never triggers a finish),
+	// but we hide the lap/timer/leaderboard HUDs entirely.
+	LAPS = 999;
+	f.style.transform = "translate3d(0, -100vh, 0)";
+	setTimeout(function(){
+		f.innerHTML = "";
+		if(VR) f.innerHTML += "<div id='divider'></div>";
+		// Black loading screen for 4 seconds
+		var loader = document.createElement("DIV");
+		loader.id = "loader";
+		loader.innerHTML = "<div class='title' id='loader-title'>Cargando...</div>";
+		f.appendChild(loader);
+		f.appendChild(element);
+		f.style.transform = "none";
+
+		// Initialise the renderer/camera/render-loop (maps loaded inside join()).
+		join();
+
+		// Once join() returns, after the loading screen, build the solo player + race.
+		setTimeout(function(){
+			loader.style.opacity = "0";
+			setTimeout(function(){ if(loader.parentNode) loader.parentNode.removeChild(loader); }, 500);
+			startSoloGame();
+		}, 4000);
+	}, 500);
+}
+
+// Solo "Cronometraje": normal race (countdown, timer, leaderboard, laps) for 1 player.
+soloCrono = function(){
+	soloMode = "crono";
+	LAPS = soloLaps;
+	f.style.transform = "translate3d(0, -100vh, 0)";
+	setTimeout(function(){
+		f.innerHTML = "";
+		if(VR) f.innerHTML += "<div id='divider'></div>";
+		var loader = document.createElement("DIV");
+		loader.id = "loader";
+		loader.innerHTML = "<div class='title' id='loader-title'>Cargando...</div>";
+		f.appendChild(loader);
+		f.appendChild(element);
+		f.style.transform = "none";
+
+		join();
+
+		setTimeout(function(){
+			loader.style.opacity = "0";
+			setTimeout(function(){ if(loader.parentNode) loader.parentNode.removeChild(loader); }, 500);
+			startSoloGame();
+		}, 2500);
+	}, 500);
+}
+
+// ---- Play with friends menu: Create room / Join room --------------
+friendsMenu = function(){
+	transitionMenu(
+		"<div class='menuitem title button menu-top' id='host' ontouchstart='this.click()' onclick='host()'>Crear una sala</div>" +
+		"<div class='menuitem title button menu-bottom' id='join' ontouchstart='this.click()' onclick='joinGame()'>Unirse a una sala</div>" +
+		"<div class='menuitem title button menu-back' id='friendsback' ontouchstart='this.click()' onclick='menu2()'>Volver</div>",
+		function(){
+			setTimeout(function(){ document.getElementById("host").style.transform = "none"; setTimeout(function(){ document.getElementById("host").style.transition = "transform .2s, box-shadow .2s"; }, 500); }, 200);
+			setTimeout(function(){ document.getElementById("join").style.transform = "none"; setTimeout(function(){ document.getElementById("join").style.transition = "transform .2s, box-shadow .2s"; }, 500); }, 700);
+			setTimeout(function(){ document.getElementById("friendsback").style.transform = "none"; }, 1200);
+		}
+	);
 }
 
 host = function(){
 	document.getElementById("host").onclick = null;
-	f.style.transform = "translate3d(0, -100vh, 0)";
-	setTimeout(function(){
-		f.innerHTML = "<div class='info title'>Use this code to join the game!<div id='code'>Loading...</div></div><div id='startgame' class='title' onclick='startGame()' ontouchstart='this.click()'>Start!</div>";
-		if(VR)
-			f.innerHTML += "<div id='divider'></div>";
-		f.appendChild(element);
-		f.style.transform = "none";
-		getCode();
-	}, 1000);
+	if(typeof lobbyStartGame == "function") {/* no-op */}
+	// Step 1: choose map type (predetermined vs custom)
+	transitionMenu(
+		"<div class='menuitem title' id='mapmenu-title'>Elige el tipo de mapa</div>" +
+		"<div class='menuitem title button menu-top' id='mappreset' ontouchstart='this.click()' onclick='hostCreatePreset()'>Mapa predeterminado</div>" +
+		"<div class='menuitem title button menu-bottom' id='mapcustom' ontouchstart='this.click()' onclick='hostCreateCustom()'>Mapa personalizado</div>" +
+		"<div class='menuitem title button menu-back' id='mapback' ontouchstart='this.click()' onclick='friendsMenu()'>Volver</div>",
+		function(){
+			setTimeout(function(){ var el = document.getElementById("mapmenu-title"); if(el) el.style.transform = "none"; }, 100);
+			setTimeout(function(){ var el = document.getElementById("mappreset"); if(el) el.style.transform = "none"; }, 400);
+			setTimeout(function(){ var el = document.getElementById("mapcustom"); if(el) el.style.transform = "none"; }, 700);
+			setTimeout(function(){ var el = document.getElementById("mapback"); if(el) el.style.transform = "none"; }, 1000);
+		}
+	);
+}
 
-	function getCode(){
+hostCreatePreset = function(){
+	lobbyMapType = "preset";
+	hostLobbySetup(false);
+}
+
+hostCreateCustom = function(){
+	lobbyMapType = "custom";
+	transitionMenu(
+		"<div class='menuitem title' id='custommap-title'>Pega los datos del mapa</div>" +
+		"<div class='menuitem title'><textarea id='mapdata' class='title' ontouchstart='this.focus()' placeholder='Pega aqu\u00ed los n\u00fameros/export del mapa'></textarea></div>" +
+		"<div class='menuitem title button' id='mapstart' ontouchstart='this.click()' onclick='hostCreateCustomGo()'>Continuar</div>" +
+		"<div class='menuitem title button menu-back' id='mapback2' ontouchstart='this.click()' onclick='friendsMenu()'>Volver</div>",
+		function(){
+			setTimeout(function(){ var el = document.getElementById("custommap-title"); if(el) el.style.transform = "none"; }, 100);
+			setTimeout(function(){ var el = document.getElementById("mapstart"); if(el) el.style.transform = "none"; }, 400);
+			setTimeout(function(){ var el = document.getElementById("mapback2"); if(el) el.style.transform = "none"; }, 700);
+		}
+	);
+}
+
+hostCreateCustomGo = function(){
+	var md = document.getElementById("mapdata");
+	if(!md || md.value.trim().length == 0){
+		alert("Tienes que pegar los datos del mapa.");
+		return;
+	}
+	lobbyMapData = md.value.trim();
+	hostLobbySetup(true);
+}
+
+// Creates the room in Firebase and shows the lobby (ready-check) screen.
+// `isCustom` controls whether the room code is 5 chars (custom) or 4 chars (preset).
+lobbyMapType = "preset";
+lobbyMapData = null;
+hostLobbySetup = function(isCustom){
+	lobbyIsHost = true;
+	// Retry-safe code generator
+	function getCode(cb){
 		code = "";
 		var letters = "ABCDEFGHIJKLMMNOPQRSTUVWXYZ";
-		for(var i = 0; i < 4; i++)
+		var len = isCustom ? 5 : 4;
+		for(var i = 0; i < len; i++)
 			code += letters[Math.floor(Math.random() * letters.length)];
 		database.ref(code).once("value", function(codeCheck){
-			console.log(codeCheck.val());
-			if(codeCheck.val() == null || codeCheck.val().status == -1 || !codeCheck.val().timestamp || Date.now() - codeCheck.val().timestamp > 1000 * 60 * 60 * 24){ // Allow overwriting a game if it was created more than 24 hours ago - seems safe.
-				console.log(code);
-				document.getElementById("code").innerHTML = code;
-
-				database.ref(code).set({
-					status: 0,
-					players: {},
-					map: document.getElementById("trackcode").innerHTML,
-					timestamp: Date.now()
-				});
-
-				database.ref(code + "/players").on("child_added", function(p){
-					console.log(p);
-					players[p.ref_.path.pieces_[2]] = {
-						data: p.val(),
-						model: new THREE.Mesh(new THREE.BoxBufferGeometry(1, 1, 2))
-					};
-					var pl = players[p.ref_.path.pieces_[2]];
-					pl.model.position.set(pl.data.x, 0.6, pl.data.y);
-					pl.model.material = new THREE.MeshLambertMaterial({color: new THREE.Color("hsl(" + pl.data.color + ", 100%, 50%)")});
-					var wheel = new THREE.Mesh(
-						new THREE.CylinderBufferGeometry(0.5, 0.5, 0.2, 10),
-						new THREE.MeshLambertMaterial({color: new THREE.Color("#222")})
-					);
-					var w1 = wheel.clone();
-					w1.position.set(0.6, -0.1, 0.7);
-					w1.rotation.set(Math.PI / 2, 0, Math.PI / 2);
-					pl.model.add(w1);
-					var w2 = wheel.clone();
-					w2.position.set(-0.6, -0.1, 0.7);
-					w2.rotation.set(Math.PI / 2, 0, Math.PI / 2);
-					pl.model.add(w2);
-					var w3 = wheel.clone();
-					w3.position.set(0.6, -0.1, -0.7);
-					w3.rotation.set(Math.PI / 2, 0, Math.PI / 2);
-					pl.model.add(w3);
-					var w4 = wheel.clone();
-					w4.position.set(-0.6, -0.1, -0.7);
-					w4.rotation.set(Math.PI / 2, 0, Math.PI / 2);
-					pl.model.add(w4);
-					var label = document.createElement("DIV");
-					label.className = "label";
-					label.innerHTML = pl.data.name.replaceAll("<", "&lt;") + "<br/>|";
-					pl.label = label;
-					label.position = pl.model.position;
-					console.log(label);
-					f.appendChild(label);
-					labels.push(label);
-					pl.model.receiveShadow = true;
-					scene.add(pl.model);
-
-					if(p.ref_.path.pieces_[2] == me.ref.path.pieces_[2]){
-						me.label = pl.label;
-						me.model = pl.model;
-						me.label.innerHTML = "";
-					}
-				});
-
-				database.ref(code + "/players").on("child_changed", function(p){
-					// console.log(p);
-					players[p.ref_.path.pieces_[2]].data = p.val();
-				});
-
-				me.ref = database.ref(code + "/players").push();
-				me.data = {
-					x: 0,
-					y: 0,
-					xv: 0,
-					yv: 0,
-					dir: 0,
-					steer: 0,
-					color: color,
-					name: name,
-					checkpoint: 0,
-					lap: 0,
-					collision: {}
-				}
-				me.ref.set(me.data);
-
-				database.ref(code + "/status").on("value", function(v){
-					v = v.val();
-					if(v == 1){
-						document.getElementsByClassName("info")[0].outerHTML = "";
-						document.getElementById("startgame").outerHTML = "";
-
-						gameStarted = true;
-						gameSortaStarted = true;
-
-						var countDown = document.createElement("DIV");
-						countDown.innerHTML = "3";
-						countDown.className = "title";
-						countDown.id = "countdown";
-						f.appendChild(countDown);
-
-						lap = document.createElement("DIV");
-						lap.innerHTML = "1/" + LAPS;
-						lap.className = "title";
-						lap.id = "lap";
-						f.appendChild(lap);
-
-						leaderboard = document.createElement("DIV");
-						leaderboard.id = "leaderboard";
-						f.appendChild(leaderboard);
-
-						try{ createRaceHUD(f); }catch(e){ console.error("createRaceHUD error:", e); }
-
-						setTimeout(function(){
-							countDown.innerHTML = "2";
-						}, 1000);
-
-						setTimeout(function(){
-							countDown.innerHTML = "1";
-						}, 2000);
-
-						setTimeout(function(){
-							countDown.innerHTML = "GO!";
-							gameSortaStarted = false;
-							raceStartTime = Date.now();
-						}, 3000);
-
-						setTimeout(function(){
-							countDown.innerHTML = "";
-						}, 4000);
-					}
-				});
-			}else
-				getCode();
+			var cv = codeCheck.val();
+			if(cv == null || cv.status == -1 || !cv.timestamp || Date.now() - cv.timestamp > 1000 * 60 * 60 * 24){
+				cb();
+			}else{
+				getCode(cb);
+			}
 		});
 	}
 
-	join();
+	getCode(function(){
+		var mapValue = isCustom ? lobbyMapData : document.getElementById("trackcode").innerHTML;
+		document.getElementById("trackcode").innerHTML = mapValue;
+		database.ref(code).set({
+			status: 0,
+			players: {},
+			map: mapValue,
+			mapType: isCustom ? "custom" : "preset",
+			timestamp: Date.now()
+		});
+
+		// Track whose mapType it is on the host side so the lobby UI shows it.
+		lobbyIsCustom = isCustom;
+
+		// Build the lobby UI (ready-check instead of host Start button)
+		f.style.transform = "translate3d(0, -100vh, 0)";
+		setTimeout(function(){
+			f.innerHTML =
+				"<div class='info title'>C\u00f3digo de la sala<div id='code'>" + code + "</div>" +
+				"<div class='subtitle'>" + (lobbyIsCustom ? "Mapa personalizado" : "Mapa predeterminado") + "</div>" +
+				"</div>" +
+				"<div id='lobbylist'></div>" +
+				"<div class='menuitem title button ready-btn' id='readybtn' ontouchstart='this.click()' onclick='toggleReady()'>Estoy listo</div>";
+			if(VR) f.innerHTML += "<div id='divider'></div>";
+			f.appendChild(element);
+			f.style.transform = "none";
+			join();
+
+			// Listen for players joining
+			database.ref(code + "/players").on("child_added", function(p){
+				var pid = p.ref_.path.pieces_[2];
+				players[pid] = {
+					data: p.val(),
+					model: new THREE.Mesh(new THREE.BoxBufferGeometry(1, 1, 2))
+				};
+				var pl = players[pid];
+				pl.model.position.set(pl.data.x, 0.6, pl.data.y);
+				pl.model.material = new THREE.MeshLambertMaterial({color: new THREE.Color("hsl(" + pl.data.color + ", 100%, 50%)")});
+				var wheel = new THREE.Mesh(
+					new THREE.CylinderBufferGeometry(0.5, 0.5, 0.2, 10),
+					new THREE.MeshLambertMaterial({color: new THREE.Color("#222")})
+				);
+				var w1 = wheel.clone();
+				w1.position.set(0.6, -0.1, 0.7);
+				w1.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+				pl.model.add(w1);
+				var w2 = wheel.clone();
+				w2.position.set(-0.6, -0.1, 0.7);
+				w2.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+				pl.model.add(w2);
+				var w3 = wheel.clone();
+				w3.position.set(0.6, -0.1, -0.7);
+				w3.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+				pl.model.add(w3);
+				var w4 = wheel.clone();
+				w4.position.set(-0.6, -0.1, -0.7);
+				w4.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+				pl.model.add(w4);
+				var label = document.createElement("DIV");
+				label.className = "label";
+				label.innerHTML = escapeHtml(pl.data.name).substring(0, 50) + "<br/>|";
+				pl.label = label;
+				label.position = pl.model.position;
+				f.appendChild(label);
+				labels.push(label);
+				pl.model.receiveShadow = true;
+				scene.add(pl.model);
+
+				if(pid == me.ref.path.pieces_[2]){
+					me.label = pl.label;
+					me.model = pl.model;
+					me.label.innerHTML = "";
+				}
+				renderLobbyList();
+			});
+
+			database.ref(code + "/players").on("child_changed", function(p){
+				var pid = p.ref_.path.pieces_[2];
+				if(players[pid]) players[pid].data = p.val();
+				renderLobbyList();
+			});
+
+			database.ref(code + "/players").on("child_removed", function(p){
+				var pid = p.ref_.path.pieces_[2];
+				if(players[pid]){
+					if(players[pid].model) scene.remove(players[pid].model);
+					if(players[pid].label && players[pid].label.parentNode) players[pid].label.parentNode.removeChild(players[pid].label);
+					var li = labels.indexOf(players[pid].label);
+					if(li >= 0) labels.splice(li, 1);
+					delete players[pid];
+				}
+				renderLobbyList();
+			});
+
+			me.ref = database.ref(code + "/players").push();
+			me.data = {
+				x: carPos[0].x,
+				y: carPos[0].y,
+				xv: 0,
+				yv: 0,
+				dir: 0,
+				steer: 0,
+				color: color,
+				name: name,
+				checkpoint: 0,
+				lap: 0,
+				ready: false,
+				collision: {}
+			}
+			me.ref.set(me.data);
+
+			renderLobbyList();
+
+			// Auto-start when everyone is ready (status flips to 1 server-side).
+			database.ref(code + "/status").on("value", function(v){
+				v = v.val();
+				if(v == 1){
+					startHostedRace();
+				}
+			});
+		}, 500);
+	});
+}
+
+// Renders the lobby member-list with check-emoji for ready ones.
+function renderLobbyList(){
+	var list = document.getElementById("lobbylist");
+	if(!list) return;
+	var html = "<div class='lobby-title'>Jugadores en la sala:</div>";
+	var count = 0, readyCount = 0;
+	for(var pid in players){
+		var d = players[pid].data;
+		if(!d) continue;
+		count++;
+		if(d.ready) readyCount++;
+		var check = d.ready ? " \u2705" : " \u23F3";
+		var meCls = (pid == me.ref.key) ? " lobby-me" : "";
+		html += "<div class='lobby-row" + meCls + "'>" + escapeHtml(d.name).substring(0, 20) + check + "</div>";
+	}
+	if(count > 0)
+		html += "<div class='lobby-count'>" + readyCount + "/" + count + " listos</div>";
+	else
+		html += "<div class='lobby-count'>Esperando jugadores...</div>";
+	list.innerHTML = html;
+
+	// Update the ready button text
+	var btn = document.getElementById("readybtn");
+	if(btn){
+		btn.innerHTML = me.data.ready ? "Estoy listo \u2705" : "Estoy listo";
+		btn.className = "menuitem title button ready-btn" + (me.data.ready ? " ready-btn-on" : "");
+	}
+
+	lobbyAllReady = count > 0 && readyCount == count;
+	if(lobbyIsHost && lobbyAllReady && !hostedRaceStarted){
+		hostedRaceStarted = true;
+		database.ref(code + "/status").set(1);
+	}
+}
+
+// Toggles the local player's ready state, and (if host) auto-starts the race once everyone is ready.
+toggleReady = function(){
+	me.data.ready = !me.data.ready;
+	me.ref.update({ready: me.data.ready});
+	if(me.ref && me.ref.key && players[me.ref.key])
+		players[me.ref.key].data.ready = me.data.ready;
+	renderLobbyList();
+}
+
+startHostedRace = function(){
+	if(gameStarted) return;
+	var info = document.getElementsByClassName("info")[0];
+	if(info) info.outerHTML = "";
+	var rb = document.getElementById("readybtn");
+	if(rb) rb.outerHTML = "";
+	var ll = document.getElementById("lobbylist");
+	if(ll) ll.outerHTML = "";
+
+	gameStarted = true;
+	gameSortaStarted = true;
+
+	var countDown = document.createElement("DIV");
+	countDown.innerHTML = "3";
+	countDown.className = "title";
+	countDown.id = "countdown";
+	f.appendChild(countDown);
+
+	lap = document.createElement("DIV");
+	lap.innerHTML = "1/" + LAPS;
+	lap.className = "title";
+	lap.id = "lap";
+	f.appendChild(lap);
+
+	leaderboard = document.createElement("DIV");
+	leaderboard.id = "leaderboard";
+	f.appendChild(leaderboard);
+
+	try{ createRaceHUD(f); }catch(e){ console.error("createRaceHUD error:", e); }
+
+	setTimeout(function(){ countDown.innerHTML = "2"; }, 1000);
+	setTimeout(function(){ countDown.innerHTML = "1"; }, 2000);
+	setTimeout(function(){
+		countDown.innerHTML = "\u00a1YA!";
+		gameSortaStarted = false;
+		raceStartTime = Date.now();
+	}, 3000);
+	setTimeout(function(){ countDown.innerHTML = ""; }, 4000);
 }
 
 joinGame = function(){
+	lobbyIsHost = false;
 	document.getElementById("join").onclick = null;
-	f.style.transform = "translate3d(0, -100vh, 0)";
-	setTimeout(function(){
-		f.innerHTML = "<div class='info title'>Enter a code to join a game!<input id='incode' class='title' onkeyup='codeCheck(event)' ontouchstart='this.focus()'></input></div>";
-		if(VR)
-			f.innerHTML += "<div id='divider'></div>";
-		f.appendChild(element);
-		f.style.transform = "none";
-	}, 1000);
+	transitionMenu(
+		"<div class='info title' style='position:static;border:none;background:none;'>Introduce el c\u00f3digo de la sala<div id='codehint'>(4 letras si mapa predeterminado, 5 si mapa personalizado)</div></div>" +
+		"<input id='incode' class='title' onkeyup='codeCheck(event)' ontouchstart='this.focus()' maxlength='5' autofocus></input>" +
+		"<div class='menuitem title button menu-back' id='joinback' ontouchstart='this.click()' onclick='friendsMenu()'>Volver</div>",
+		function(){
+			var ic = document.getElementById("incode");
+			if(ic) ic.focus();
+			setTimeout(function(){ var el = document.getElementById("joinback"); if(el) el.style.transform = "none"; }, 300);
+		}
+	);
 	join();
 }
 
 var map, trees, signs, startc, main;
+
+// --- Solo mode setup --------------------------------------------------
+// Builds a fake `me.ref` and a fake `players` entry so the existing
+// render/physics code (which references `me.ref.path.pieces_[2]`) keeps
+// working without touching Firebase.
+startSoloGame = function(){
+	var myId = "me";
+	me.ref = { path: { pieces_: [code || "solo", "players", myId] }, key: myId };
+	players[myId] = {
+		data: {
+			x: carPos[0].x,
+			y: carPos[0].y,
+			xv: 0,
+			yv: 0,
+			dir: 0,
+			steer: 0,
+			color: color,
+			name: name,
+			checkpoint: 0,
+			lap: 0,
+			collision: {}
+		},
+		model: new THREE.Mesh(new THREE.BoxBufferGeometry(1, 1, 2))
+	};
+	var pl = players[myId];
+	pl.model.position.set(pl.data.x, 0.6, pl.data.y);
+	pl.model.material = new THREE.MeshLambertMaterial({color: new THREE.Color("hsl(" + pl.data.color + ", 100%, 50%)")});
+	var wheel = new THREE.Mesh(
+		new THREE.CylinderBufferGeometry(0.5, 0.5, 0.2, 10),
+		new THREE.MeshLambertMaterial({color: new THREE.Color("#222")})
+	);
+	var w1 = wheel.clone();
+	w1.position.set(0.6, -0.1, 0.7);
+	w1.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+	pl.model.add(w1);
+	var w2 = wheel.clone();
+	w2.position.set(-0.6, -0.1, 0.7);
+	w2.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+	pl.model.add(w2);
+	var w3 = wheel.clone();
+	w3.position.set(0.6, -0.1, -0.7);
+	w3.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+	pl.model.add(w3);
+	var w4 = wheel.clone();
+	w4.position.set(-0.6, -0.1, -0.7);
+	w4.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+	pl.model.add(w4);
+	pl.model.receiveShadow = true;
+	scene.add(pl.model);
+	me.label = document.createElement("DIV");
+	me.label.className = "label";
+	me.label.innerHTML = "";
+	me.label.position = pl.model.position;
+	me.model = pl.model;
+
+	gameStarted = true;
+	// Entrenamiento skips the countdown; Cronometraje shows it.
+	if(soloMode == "crono"){
+		gameSortaStarted = true;
+		var countDown = document.createElement("DIV");
+		countDown.innerHTML = "3";
+		countDown.className = "title";
+		countDown.id = "countdown";
+		f.appendChild(countDown);
+
+			lap = document.createElement("DIV");
+			lap.innerHTML = "1/" + soloLaps;
+		lap.className = "title";
+		lap.id = "lap";
+		f.appendChild(lap);
+
+		leaderboard = document.createElement("DIV");
+		leaderboard.id = "leaderboard";
+		leaderboard.style.display = "none"; // hide empty leaderboard in solo mode
+		f.appendChild(leaderboard);
+
+		try{ createRaceHUD(f); }catch(e){ console.error("createRaceHUD error:", e); }
+
+		setTimeout(function(){ countDown.innerHTML = "2"; }, 1000);
+		setTimeout(function(){ countDown.innerHTML = "1"; }, 2000);
+		setTimeout(function(){
+			countDown.innerHTML = "\u00a1YA!";
+			gameSortaStarted = false;
+			raceStartTime = Date.now();
+		}, 3000);
+		setTimeout(function(){ countDown.innerHTML = ""; }, 4000);
+	}
+	// Entrenamiento: nothing to render beyond the canvas (no HUD).
+};
 
 function deleteMap(){
 	while(map.children.length > 0)
@@ -649,14 +973,16 @@ function createRaceHUD(container){
 	document.getElementById("spectatePrev").onclick = function(){ setSpectateTarget(spectateIndex - 1); };
 	document.getElementById("spectateNext").onclick = function(){ setSpectateTarget(spectateIndex + 1); };
 
-	// Listen (for our whole time in the race) to how many people are watching US, and show it only to ourselves.
-	var myId = me.ref.key;
-	database.ref(code + "/players/" + myId + "/spectators").on("value", function(snap){
-		var count = snap.exists() ? Object.keys(snap.val()).length : 0;
-		var countEl = document.getElementById("eyeCount");
-		if(countEl) countEl.innerHTML = count;
-		eyeBadge.style.display = count > 0 ? "flex" : "none";
-	});
+		if(!soloMode && database && me.ref && me.ref.key){
+			// Listen (for our whole time in the race) to how many people are watching US, and show it only to ourselves.
+			var myId = me.ref.key;
+			database.ref(code + "/players/" + myId + "/spectators").on("value", function(snap){
+				var count = snap.exists() ? Object.keys(snap.val()).length : 0;
+				var countEl = document.getElementById("eyeCount");
+				if(countEl) countEl.innerHTML = count;
+				eyeBadge.style.display = count > 0 ? "flex" : "none";
+			});
+		}
 
 	console.log("createRaceHUD: terminado sin errores");
 }
@@ -700,12 +1026,12 @@ function queueBanner(msg){
 
 function queueFinishBanner(playerName, place){
 	console.log("queueFinishBanner:", playerName, place);
-	queueBanner(playerName.replaceAll("<", "&lt;") + " termin\u00f3 el " + place + "\u00ba");
+		queueBanner(escapeHtml(playerName) + " termin\u00f3 el " + place + "\u00ba");
 }
 
 function queueLastLapBanner(playerName){
 	console.log("queueLastLapBanner:", playerName);
-	queueBanner("\u00a1" + playerName.replaceAll("<", "&lt;") + " le queda una vuelta!");
+		queueBanner("\u00a1" + escapeHtml(playerName) + " le queda una vuelta!");
 }
 
 function showNextFinishBanner(){
@@ -781,7 +1107,7 @@ function setSpectateTarget(idx){
 
 	var targetPlayer = players[mySpectateTargetId];
 	var nameEl = document.getElementById("spectateName");
-	if(nameEl) nameEl.innerHTML = targetPlayer && targetPlayer.data ? targetPlayer.data.name.replaceAll("<", "&lt;") : "";
+		if(nameEl) nameEl.innerHTML = targetPlayer && targetPlayer.data ? escapeHtml(targetPlayer.data.name) : "";
 }
 
 function stopSpectating(){
@@ -824,7 +1150,7 @@ function updateFinalStandings(){
 	for(var i = 0; i < standings.length; i++){
 		var s = standings[i];
 		html += "<div class='fsrow'><span class='fspos'>" + (i + 1) + "\u00ba</span><span class='fsname'>"
-			+ s.name.replaceAll("<", "&lt;").substring(0, 20) + "</span><span class='fstime'>"
+				+ escapeHtml(s.name).substring(0, 20) + "</span><span class='fstime'>"
 			+ formatTime(s.finishTime) + "</span></div>";
 	}
 	if(finalStandings) finalStandings.innerHTML = html;
@@ -932,7 +1258,7 @@ function join(){
 			var displayLap = Math.min(s.lap, LAPS);
 			html += "<div class='lbrow" + (s.isMe ? " lbme" : "") + "'>"
 				+ "<span class='lbpos'>" + (i + 1) + "</span>"
-				+ "<span class='lbname'>" + (s.finishedPlace ? "\uD83C\uDFC1 " : "") + s.name.replaceAll("<", "&lt;").substring(0, 20) + "</span>"
+				+ "<span class='lbname'>" + (s.finishedPlace ? "\uD83C\uDFC1 " : "") + escapeHtml(s.name).substring(0, 20) + "</span>"
 				+ "<span class='lblap'>" + displayLap + "/" + LAPS + "</span>"
 				+ "</div>";
 		}
@@ -1080,7 +1406,14 @@ function join(){
 					}
 
 					if(play.data.lap > LAPS && !play.data.finishedPlace && p == myId){
-						claimFinishPlace();
+						if(soloMode == "crono"){
+							// Solo cronometraje: just record our own finish locally.
+							me.data.finishedPlace = 1;
+							me.data.finishTime = raceStartTime ? Date.now() - raceStartTime : null;
+							myFinishTime = Date.now();
+						}else{
+							claimFinishPlace();
+						}
 					}
 
 					for(var pl in players){
@@ -1173,18 +1506,18 @@ function join(){
 				}
 			}
 
-			me.ref.set(me.data);
+			if(typeof me.ref.set == "function" && !soloMode) me.ref.set(me.data);
 
-			lap.innerHTML = me.data.lap <= LAPS ? me.data.lap + "/" + LAPS : "";
+			if(lap) lap.innerHTML = me.data.lap <= LAPS && soloMode != "entreno" ? me.data.lap + "/" + LAPS : "";
 
-			if(raceTimerEl){
+			if(raceTimerEl && soloMode != "entreno"){
 				if(me.data.finishedPlace > 0 && me.data.finishTime != null){
 					raceTimerEl.innerHTML = formatTime(me.data.finishTime);
 				}else if(raceStartTime){
 					raceTimerEl.innerHTML = formatTime(Date.now() - raceStartTime);
 				}
 			}
-			updateLeaderboard();
+			if(soloMode != "entreno") updateLeaderboard();
 		}else{
 			camera.position.set(50 * Math.sin(x), 20, 50 * Math.cos(x));
 			camera.lookAt(player.position);
@@ -1239,21 +1572,57 @@ function join(){
 }
 codeCheck = function(){
 	var incode = document.getElementById("incode");
-	if(incode.value.length == 4){
-		incode.onkeyup = null;
-		code = incode.value.toUpperCase();
-		database.ref(code).once("value", function(cc){
-			if(typeof cc.val() != "undefined" && cc.val() != null && cc.val().status === 0){
-				document.getElementsByClassName("info")[0].innerHTML = "<div class='info title'>Waiting for the game to start...<div id='code'>" + code + "</div></div>";
+	if(incode.value.length > 5){
+		incode.value = incode.value.substring(0, 5);
+		return;
+	}
+	// Only act when 4 or 5 chars were typed.
+	if(incode.value.length != 4 && incode.value.length != 5){
+		incode.onkeyup = codeCheck;
+		return;
+	}
+	incode.onkeyup = null;
+	code = incode.value.toUpperCase();
+	lobbyIsCustom = (code.length == 5);
+	database.ref(code).once("value", function(cc){
+		var cv = cc.val();
+		if(typeof cv != "undefined" && cv != null && cv.status === 0){
+			// Found a valid room. Show lobby (ready-check). For custom-map (5-char) rooms,
+			// pull the map data from Firebase and load it locally.
+			database.ref(code + "/map").once("value", function(mapsnap){
+				if(mapsnap.val() != null){
+					document.getElementById("trackcode").innerHTML = mapsnap.val();
+					deleteMap();
+					eval(loadMap());
+				}
+			});
+
+			// Build the lobby UI (mirrors host's lobby layout, minus the action-sheet).
+			var loader = document.createElement("DIV");
+			loader.id = "loader";
+			loader.innerHTML = "<div class='title' id='loader-title'>Entrando en la sala...</div>";
+			f.style.transform = "translate3d(0, -100vh, 0)";
+			setTimeout(function(){
+				f.innerHTML =
+					"<div class='info title'>C\u00f3digo de la sala<div id='code'>" + code + "</div>" +
+					"<div class='subtitle'>" + (lobbyIsCustom ? "Mapa personalizado" : "Mapa predeterminado") + "</div>" +
+					"</div>" +
+					"<div id='lobbylist'></div>" +
+					"<div class='menuitem title button ready-btn' id='readybtn' ontouchstart='this.click()' onclick='toggleReady()'>Estoy listo</div>";
+				if(VR) f.innerHTML += "<div id='divider'></div>";
+				f.appendChild(element);
+				f.style.transform = "none";
+
 				var playerCount = 0;
-				for(var p in cc.val().players){
+				// First, snapshot the players currently in the room.
+				var existingPlayers = cv.players || {};
+				for(var pid in existingPlayers){
 					playerCount++;
-					console.log(p);
-					players[p] = {
-						data: cc.val().players[p],
+					players[pid] = {
+						data: existingPlayers[pid],
 						model: new THREE.Mesh(new THREE.BoxBufferGeometry(1, 1, 2))
 					};
-					var pl = players[p];
+					var pl = players[pid];
 					pl.model.position.set(pl.data.x, 0.6, pl.data.y);
 					pl.model.material = new THREE.MeshLambertMaterial({color: new THREE.Color("hsl(" + pl.data.color + ", 100%, 50%)")});
 					var wheel = new THREE.Mesh(
@@ -1278,73 +1647,85 @@ codeCheck = function(){
 					pl.model.add(w4);
 					var label = document.createElement("DIV");
 					label.className = "label";
-					label.innerHTML = pl.data.name.replaceAll("<", "&lt;").substring(0, 50) + "<br/>|";
+						label.innerHTML = escapeHtml(pl.data.name).substring(0, 50) + "<br/>|";
 					pl.label = label;
 					label.position = pl.model.position;
-					console.log(label);
 					f.appendChild(label);
 					labels.push(label);
 					pl.model.receiveShadow = true;
 					scene.add(pl.model);
 				}
-				database.ref(code + "/players").on("child_added", function(p){
-					if(typeof players[p.ref_.path.pieces_[2]] == "undefined"){
-						console.log(p);
-						players[p.ref_.path.pieces_[2]] = {
-							data: p.val(),
-							model: new THREE.Mesh(new THREE.BoxBufferGeometry(1, 1, 2))
-						};
-						var pl = players[p.ref_.path.pieces_[2]];
-						pl.model.position.set(pl.data.x, 0.6, pl.data.y);
-						pl.model.material = new THREE.MeshLambertMaterial({color: new THREE.Color("hsl(" + pl.data.color + ", 100%, 50%)")});
-						var wheel = new THREE.Mesh(
-							new THREE.CylinderBufferGeometry(0.5, 0.5, 0.2, 10),
-							new THREE.MeshLambertMaterial({color: new THREE.Color("#222")})
-						);
-						var w1 = wheel.clone();
-						w1.position.set(0.6, -0.1, 0.7);
-						w1.rotation.set(Math.PI / 2, 0, Math.PI / 2);
-						pl.model.add(w1);
-						var w2 = wheel.clone();
-						w2.position.set(-0.6, -0.1, 0.7);
-						w2.rotation.set(Math.PI / 2, 0, Math.PI / 2);
-						pl.model.add(w2);
-						var w3 = wheel.clone();
-						w3.position.set(0.6, -0.1, -0.7);
-						w3.rotation.set(Math.PI / 2, 0, Math.PI / 2);
-						pl.model.add(w3);
-						var w4 = wheel.clone();
-						w4.position.set(-0.6, -0.1, -0.7);
-						w4.rotation.set(Math.PI / 2, 0, Math.PI / 2);
-						pl.model.add(w4);
-						var label = document.createElement("DIV");
-						label.className = "label";
-						label.innerHTML = pl.data.name.replaceAll("<", "&lt;").substring(0, 50) + "<br/>|";
-						pl.label = label;
-						label.position = pl.model.position;
-						console.log(label);
-						f.appendChild(label);
-						labels.push(label);
-						pl.model.receiveShadow = true;
-						scene.add(pl.model);
 
-						if(p.ref_.path.pieces_[2] == me.ref.path.pieces_[2]){
-							me.label = pl.label;
-							me.model = pl.model;
-							me.label.innerHTML = "";
-						}
+				// Listen for further additions / changes / removals.
+				database.ref(code + "/players").on("child_added", function(p){
+					var pid = p.ref_.path.pieces_[2];
+					if(typeof players[pid] != "undefined") return;
+					players[pid] = {
+						data: p.val(),
+						model: new THREE.Mesh(new THREE.BoxBufferGeometry(1, 1, 2))
+					};
+					var pl = players[pid];
+					pl.model.position.set(pl.data.x, 0.6, pl.data.y);
+					pl.model.material = new THREE.MeshLambertMaterial({color: new THREE.Color("hsl(" + pl.data.color + ", 100%, 50%)")});
+					var wheel = new THREE.Mesh(
+						new THREE.CylinderBufferGeometry(0.5, 0.5, 0.2, 10),
+						new THREE.MeshLambertMaterial({color: new THREE.Color("#222")})
+					);
+					var w1 = wheel.clone();
+					w1.position.set(0.6, -0.1, 0.7);
+					w1.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+					pl.model.add(w1);
+					var w2 = wheel.clone();
+					w2.position.set(-0.6, -0.1, 0.7);
+					w2.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+					pl.model.add(w2);
+					var w3 = wheel.clone();
+					w3.position.set(0.6, -0.1, -0.7);
+					w3.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+					pl.model.add(w3);
+					var w4 = wheel.clone();
+					w4.position.set(-0.6, -0.1, -0.7);
+					w4.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+					pl.model.add(w4);
+					var label = document.createElement("DIV");
+					label.className = "label";
+						label.innerHTML = escapeHtml(pl.data.name).substring(0, 50) + "<br/>|";
+					pl.label = label;
+					label.position = pl.model.position;
+					f.appendChild(label);
+					labels.push(label);
+					pl.model.receiveShadow = true;
+					scene.add(pl.model);
+
+					if(p.ref_.path.pieces_[2] == me.ref.path.pieces_[2]){
+						me.label = pl.label;
+						me.model = pl.model;
+						me.label.innerHTML = "";
 					}
+					renderLobbyList();
 				});
 
 				database.ref(code + "/players").on("child_changed", function(p){
-					// console.log(p);
-					players[p.ref_.path.pieces_[2]].data = p.val();
+					var pid = p.ref_.path.pieces_[2];
+					if(players[pid]) players[pid].data = p.val();
+					renderLobbyList();
 				});
-				console.log("playerCount: " + playerCount);
+				database.ref(code + "/players").on("child_removed", function(p){
+					var pid = p.ref_.path.pieces_[2];
+					if(players[pid]){
+						if(players[pid].model) scene.remove(players[pid].model);
+						if(players[pid].label && players[pid].label.parentNode) players[pid].label.parentNode.removeChild(players[pid].label);
+						var li = labels.indexOf(players[pid].label);
+						if(li >= 0) labels.splice(li, 1);
+						delete players[pid];
+					}
+					renderLobbyList();
+				});
+
 				me.ref = database.ref(code + "/players").push();
 				me.data = {
-					x: carPos[playerCount].x,
-					y: carPos[playerCount].y,
+					x: carPos[playerCount] && carPos[playerCount].x != null ? carPos[playerCount].x : 0,
+					y: carPos[playerCount] && carPos[playerCount].y != null ? carPos[playerCount].y : 0,
 					xv: 0,
 					yv: 0,
 					dir: 0,
@@ -1353,71 +1734,29 @@ codeCheck = function(){
 					name: name,
 					checkpoint: 0,
 					lap: 0,
+					ready: false,
 					collision: {}
 				}
 				me.ref.set(me.data);
+				renderLobbyList();
 
+				// Auto-start race when host flips status.
 				database.ref(code + "/status").on("value", function(v){
 					v = v.val();
 					if(v == 1){
-						document.getElementsByClassName("info")[0].outerHTML = "";
-
-						gameStarted = true;
-						gameSortaStarted = true;
-
-						var countDown = document.createElement("DIV");
-						countDown.innerHTML = "3";
-						countDown.className = "title";
-						countDown.id = "countdown";
-						f.appendChild(countDown);
-
-						lap = document.createElement("DIV");
-						lap.innerHTML = "1/3";
-						lap.className = "title";
-						lap.id = "lap";
-						f.appendChild(lap);
-
-						leaderboard = document.createElement("DIV");
-						leaderboard.id = "leaderboard";
-						f.appendChild(leaderboard);
-
-						try{ createRaceHUD(f); }catch(e){ console.error("createRaceHUD error:", e); }
-
-						setTimeout(function(){
-							countDown.innerHTML = "2";
-						}, 1000);
-
-						setTimeout(function(){
-							countDown.innerHTML = "1";
-						}, 2000);
-
-						setTimeout(function(){
-							countDown.innerHTML = "GO!";
-							gameSortaStarted = false;
-							raceStartTime = Date.now();
-						}, 3000);
-
-						setTimeout(function(){
-							countDown.innerHTML = "";
-						}, 4000);
+						startHostedRace();
 					}
 				});
-				database.ref(code + "/map").once("value", function(e){
-					document.getElementById("trackcode").innerHTML = e.val();
-					deleteMap();
-					eval(loadMap());
-				});
-			}else
-				incode.onkeyup = codeCheck;
-		});
-	}else{
-		incode.onkeyup = codeCheck;
-		if(incode.value.length > 4)
-			incode.value = incode.value.substring(0, 4);
+			}, 500);
+		}else{
+			// Room not found / not joinable: enable typing again.
+			incode.onkeyup = codeCheck;
+			alert("No se encontr\u00f3 ninguna sala con ese c\u00f3digo, o ya est\u00e1 cerrada.");
+		}
+	});
 	}
-}
 
-function startGame(){
+	function startGame(){
 	database.ref(code + "/status").set(1);
 }
 
@@ -1441,5 +1780,5 @@ if(mobile){
 
 document.body.onkeydown = function(e){
 	if(e.keyCode == 73 && (e.ctrlKey || e.metaKey))
-		document.getElementById("trackcode").innerText = prompt("Track data?")
+		document.getElementById("trackcode").innerText = prompt("Datos del mapa?")
 }

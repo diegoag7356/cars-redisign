@@ -24,7 +24,7 @@
 		<script src="https://jchabin.github.io/VR-ThreeJS-Test/ThreeJS/DeviceOrientationControls.js"></script>
 		<script src="https://jchabin.github.io/VR-ThreeJS-Test/ThreeJS/StereoEffect.js"></script>
 		<script data-ad-client="ca-pub-8222390470642566" async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
-		<title>Online Racing Game!</title>
+		<title>Cars Rediseñado</title>
 	</head>
 	<body>
 	<div id="trackcode" class="data">
@@ -32,13 +32,13 @@
 	</div>
 	<div id="fore">
 		<div id="version">v1.1.3.14</div>
-		<div class="title" id="title">Online Racing Game!</div>
-		<div class="menuitem title">Pick a name:<br/><input id="name" class="title" ontouchstart="this.focus()" placeholder="Name"></input></div>
+		<div class="title" id="title">Cars Rediseñado</div>
+		<div class="menuitem title">Elige un nombre:<br/><input id="name" class="title" ontouchstart="this.focus()" placeholder="Nombre"></input></div>
 		<script>
-			var color, updateColor, menu2, host, joinGame, codeCheck;
+			var color, updateColor, menu2, soloMenu, friendsMenu, soloEntreno, soloCrono, startSoloGame, host, hostCreatePreset, hostCreateCustom, hostCreateCustomGo, hostLobbySetup, startHostedRace, joinGame, codeCheck, toggleReady, renderLobbyList, soloMode, lobbyMapType, lobbyMapData, lobbyIsCustom, lobbyAllReady, lobbyIsHost;
 		</script>
-		<div class="menuitem title">Choose a color:<br/><div id="colorpicker" ontouchstart="event.touches[0].buttons = 1; this.onmousemove(event.touches[0])" ontouchmove="event.touches[0].buttons = 1; this.onmousemove(event.touches[0])" onmousedown="this.onmousemove(event)" onmousemove="if(event.buttons == 1){ var x = event.clientX - this.getBoundingClientRect().left; x = Math.min(this.clientWidth, Math.max(0, x)); color = Math.floor(x / this.clientWidth * 360); updateColor(); }"><div id="slider"></div></div></div>
-		<div class="menuitem title"><div id="start" onclick="menu2()">Start!</div></div>
+		<div class="menuitem title">Elige un color:<br/><div id="colorpicker" ontouchstart="event.touches[0].buttons = 1; this.onmousemove(event.touches[0])" ontouchmove="event.touches[0].buttons = 1; this.onmousemove(event.touches[0])" onmousedown="this.onmousemove(event)" onmousemove="if(event.buttons == 1){ var x = event.clientX - this.getBoundingClientRect().left; x = Math.min(this.clientWidth, Math.max(0, x)); color = Math.floor(x / this.clientWidth * 360); updateColor(); }"><div id="slider"></div></div></div>
+		<div class="menuitem title"><div id="start" onclick="menu2()">Empezar</div></div>
 		<div id="settings" onclick="this.parentNode.children[7].className = this.parentNode.children[7].className == 'sel' ? '' : 'sel';"></div>
 		<div id="toolbar">
 			<div class="tools" id="edit" onclick="location.href.includes('index.html') ? window.open('editor/index.html') : window.open('editor')"></div>

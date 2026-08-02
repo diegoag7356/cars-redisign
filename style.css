@@ -355,6 +355,85 @@ input{
 	-webkit-transform: scale(0.9);
 	        transform: scale(0.9);
 }
+#loader{
+	position: fixed;
+	inset: 0;
+	z-index: 300000;
+	background: #000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: opacity .5s ease;
+}
+#loader-title{
+	color: white;
+	font-size: 8vmin;
+	text-shadow: 0 0 2vmin white;
+}
+#mapdata{
+	width: 76vw;
+	height: 26vh;
+	resize: none;
+	color: white;
+	background: rgba(0, 0, 0, 0.55);
+	border: 1vmin solid white;
+	outline: none;
+	padding: 2vmin;
+	font-size: 3vmin;
+	text-align: left;
+}
+#codehint,
+.subtitle{
+	font-family: 'Press Start 2P', monospace;
+	font-size: 1.8vmin;
+	line-height: 3vmin;
+	margin-top: 1vmin;
+}
+#lobbylist{
+	position: absolute;
+	top: 34vmin;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 100000;
+	min-width: min(82vw, 72vmin);
+	max-width: 90vw;
+	color: white;
+	background: rgba(0, 0, 0, 0.5);
+	border: 0.6vmin solid white;
+	padding: 2vmin;
+	font-family: 'Press Start 2P', monospace;
+	text-align: left;
+}
+.lobby-title{
+	font-size: 2vmin;
+	margin-bottom: 1.5vmin;
+	text-align: center;
+}
+.lobby-row,
+.lobby-count{
+	font-size: 2vmin;
+	line-height: 4vmin;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.lobby-me{
+	color: yellow;
+}
+.lobby-count{
+	margin-top: 1vmin;
+	text-align: center;
+	color: #9fd8ff;
+}
+.ready-btn{
+	position: absolute;
+	left: 50%;
+	bottom: 6vmin;
+	transform: translateX(-50%);
+}
+.ready-btn.ready-btn-on{
+	background-color: rgba(40, 180, 80, 0.7);
+}
 .label{
 	font-family: "Press Start 2P";
 	color: white;
