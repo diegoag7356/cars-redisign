@@ -15,76 +15,14 @@ function MODS(){
 
 var serverList = [
 	{
-		apiKey: "AIzaSyDiJsMLlix5o9XqPW1EpeBvuA15XNjlR8M",
-		authDomain: "car-game-a86b9.firebaseapp.com",
-		databaseURL: "https://car-game-a86b9.firebaseio.com",
-		projectId: "car-game-a86b9",
-		storageBucket: "car-game-a86b9.appspot.com",
-		messagingSenderId: "722396856191",
-		appId: "1:722396856191:web:fb5f72917856108a50e44a"
+		apiKey: "AIzaSyDVdhuxy7e5R8zdd7Qw9HvC9AFR70dLmG0",
+		authDomain: "cars-realtime-database.firebaseapp.com",
+		databaseURL: "https://cars-realtime-database-default-rtdb.europe-west1.firebasedatabase.app",
+		projectId: "cars-realtime-database",
+		storageBucket: "cars-realtime-database.firebasestorage.app",
+		messagingSenderId: "992285748221",
+		appId: "1:992285748221:web:64a1d3d6447a22a9ac4794"
 	},
-	{
-		apiKey: "AIzaSyCsqpn0aTDqU8ffGVE284fmSEOTK2tOgq8",
-		authDomain: "car-game-backup.firebaseapp.com",
-		databaseURL: "https://car-game-backup.firebaseio.com",
-		projectId: "car-game-backup",
-		storageBucket: "car-game-backup.appspot.com",
-		messagingSenderId: "1015722732476"
-	},
-	{
-		apiKey: "AIzaSyDNuMPH_bg8Orkndl8Md6lUh_EOS3pitGs",
-		authDomain: "car-game-backup-2.firebaseapp.com",
-		databaseURL: "https://car-game-backup-2-default-rtdb.firebaseio.com",
-		projectId: "car-game-backup-2",
-		storageBucket: "car-game-backup-2.appspot.com",
-		messagingSenderId: "250860288006",
-		appId: "1:250860288006:web:9df8ed3929e7fceb2d2b87"
-	},
-	{
-		apiKey: "AIzaSyCmfz7RvzLaAo4xIxA-sH3qhXuGQZYMuvE",
-		authDomain: "car-game-backup-3.firebaseapp.com",
-		databaseURL: "https://car-game-backup-3-default-rtdb.firebaseio.com",
-		projectId: "car-game-backup-3",
-		storageBucket: "car-game-backup-3.appspot.com",
-		messagingSenderId: "477326457153",
-		appId: "1:477326457153:web:421821136bcc6a67f149c0"
-	},
-	{
-		apiKey: "AIzaSyAerrEq1YUJNZnvQhZvyRa6LOS9VyhEYvs",
-		authDomain: "car-game-backup-4.firebaseapp.com",
-		databaseURL: "https://car-game-backup-4-default-rtdb.firebaseio.com",
-		projectId: "car-game-backup-4",
-		storageBucket: "car-game-backup-4.appspot.com",
-		messagingSenderId: "802151922986",
-		appId: "1:802151922986:web:69b9ff0ad8778d51da7253"
-	},
-	{
-		apiKey: "AIzaSyCdVFLbMypdHR60NqXYs_qSpAdvvgpo9Ig",
-		authDomain: "car-game-backup-5.firebaseapp.com",
-		databaseURL: "https://car-game-backup-5-default-rtdb.firebaseio.com",
-		projectId: "car-game-backup-5",
-		storageBucket: "car-game-backup-5.appspot.com",
-		messagingSenderId: "743331533949",
-		appId: "1:743331533949:web:a724977f309c1583400d14"
-	},
-	{
-		apiKey: "AIzaSyDRmEJMfrk_y1-BLjgaD6ctaDfP8tKSyfA",
-		authDomain: "car-game-backup-6.firebaseapp.com",
-		databaseURL: "https://car-game-backup-6-default-rtdb.firebaseio.com",
-		projectId: "car-game-backup-6",
-		storageBucket: "car-game-backup-6.appspot.com",
-		messagingSenderId: "1025140224576",
-		appId: "1:1025140224576:web:cb239ab3773cb7596125a5"
-	},
-	{
-		apiKey: "AIzaSyA1y6TdFz2F0oahE-HmkA0mTAROlgIytR4",
-		authDomain: "car-game-backup-7.firebaseapp.com",
-		databaseURL: "https://car-game-backup-7-default-rtdb.firebaseio.com",
-		projectId: "car-game-backup-7",
-		storageBucket: "car-game-backup-7.appspot.com",
-		messagingSenderId: "1012238241918",
-		appId: "1:1012238241918:web:d4188393dcd596b6a6882f"
-	}
 ];
 
 var database, connectedN = -1, connectedS = undefined;
@@ -287,7 +225,12 @@ function toggleFullScreen() {
 	window.scrollTo(0,1);
 }
 
-var name, code, players = {}, me = {}, gameStarted = false, gameSortaStarted = false, left = false, right = false, lap;
+var name, code, players = {}, me = {}, gameStarted = false, gameSortaStarted = false, left = false, right = false, lap, leaderboard;
+var finishBanner, finishBannerQueue = [], finishBannerShowing = false, announcedFinishes = {};
+var myFinishTime = null, spectating = false, spectateIds = [], spectateIndex = 0;
+var spectatorUI, spectatorArrows, eyeBadge, eyeCountListenerRef = null, mySpectateTargetId = null;
+var resultsStartTime = null, resultsMode = false, resultsOverlay, finalStandings;
+var raceStartTime = null, raceTimerEl, announcedLastLap = {};
 var carPos = [
 	{x: 0, y: 0},
 	{x: 2, y: 0},
@@ -452,7 +395,7 @@ host = function(){
 					steer: 0,
 					color: color,
 					name: name,
-					checkpoint: 1,
+					checkpoint: 0,
 					lap: 0,
 					collision: {}
 				}
@@ -479,6 +422,12 @@ host = function(){
 						lap.id = "lap";
 						f.appendChild(lap);
 
+						leaderboard = document.createElement("DIV");
+						leaderboard.id = "leaderboard";
+						f.appendChild(leaderboard);
+
+						try{ createRaceHUD(f); }catch(e){ console.error("createRaceHUD error:", e); }
+
 						setTimeout(function(){
 							countDown.innerHTML = "2";
 						}, 1000);
@@ -490,6 +439,7 @@ host = function(){
 						setTimeout(function(){
 							countDown.innerHTML = "GO!";
 							gameSortaStarted = false;
+							raceStartTime = Date.now();
 						}, 3000);
 
 						setTimeout(function(){
@@ -658,6 +608,237 @@ function loadMap(){
 	return document.getElementById("trackcode").innerText.trim().split("|")[4];
 }
 
+function createRaceHUD(container){
+	console.log("createRaceHUD: iniciando");
+
+	raceTimerEl = document.createElement("DIV");
+	raceTimerEl.id = "raceTimer";
+	raceTimerEl.innerHTML = "00:00.00";
+	container.appendChild(raceTimerEl);
+
+	finishBanner = document.createElement("DIV");
+	finishBanner.id = "finishBanner";
+	container.appendChild(finishBanner);
+
+	// Eye badge: only shows to the player being watched, count of people watching THEM.
+	// Independent of spectatorUI, visible any time someone is watching you (racing, celebrating, or spectating others).
+	eyeBadge = document.createElement("DIV");
+	eyeBadge.id = "eyeBadge";
+	eyeBadge.style.display = "none";
+	eyeBadge.innerHTML = "<span class='eye-icon'>\uD83D\uDC41</span><span id='eyeCount'>0</span>";
+	container.appendChild(eyeBadge);
+
+	// Spectator controls: arrows + name of who you're currently watching.
+	spectatorUI = document.createElement("DIV");
+	spectatorUI.id = "spectatorUI";
+	spectatorUI.innerHTML =
+		"<button id='spectatePrev' class='spectate-arrow spectate-arrow-left'>&#10094;</button>" +
+		"<button id='spectateNext' class='spectate-arrow spectate-arrow-right'>&#10095;</button>" +
+		"<div id='spectateName' class='title'></div>";
+	container.appendChild(spectatorUI);
+
+	resultsOverlay = document.createElement("DIV");
+	resultsOverlay.id = "resultsOverlay";
+	resultsOverlay.innerHTML =
+		"<div id='finalStandingsBox'>" +
+			"<div class='title' id='finalStandingsTitle'>Clasificaci\u00f3n final</div>" +
+			"<div id='finalStandings'></div>" +
+		"</div>";
+	container.appendChild(resultsOverlay);
+
+	document.getElementById("spectatePrev").onclick = function(){ setSpectateTarget(spectateIndex - 1); };
+	document.getElementById("spectateNext").onclick = function(){ setSpectateTarget(spectateIndex + 1); };
+
+	// Listen (for our whole time in the race) to how many people are watching US, and show it only to ourselves.
+	var myId = me.ref.key;
+	database.ref(code + "/players/" + myId + "/spectators").on("value", function(snap){
+		var count = snap.exists() ? Object.keys(snap.val()).length : 0;
+		var countEl = document.getElementById("eyeCount");
+		if(countEl) countEl.innerHTML = count;
+		eyeBadge.style.display = count > 0 ? "flex" : "none";
+	});
+
+	console.log("createRaceHUD: terminado sin errores");
+}
+
+// Reserves an atomic finish place for the local player (1st, 2nd, 3rd...)
+function formatTime(ms){
+	if(ms == null || ms < 0) return "00:00.00";
+	var totalCentis = Math.floor(ms / 10);
+	var centis = totalCentis % 100;
+	var totalSeconds = Math.floor(totalCentis / 100);
+	var seconds = totalSeconds % 60;
+	var minutes = Math.floor(totalSeconds / 60);
+	function pad(n, len){ n = String(n); while(n.length < len) n = "0" + n; return n; }
+	return pad(minutes, 2) + ":" + pad(seconds, 2) + "." + pad(centis, 2);
+}
+
+function claimFinishPlace(){
+	if(me.data.finishedPlace) return;
+	console.log("claimFinishPlace: reclamando puesto...");
+	me.data.finishedPlace = -1; // reserve locally so we don't call this twice while the transaction resolves
+	database.ref(code + "/nextPlace").transaction(function(current){
+		return (current || 0) + 1;
+	}, function(error, committed, snapshot){
+		if(error) console.error("claimFinishPlace: error de transaccion", error);
+		if(committed && snapshot){
+			me.data.finishedPlace = snapshot.val();
+			me.data.finishTime = raceStartTime ? Date.now() - raceStartTime : null;
+			myFinishTime = Date.now();
+			me.ref.set(me.data);
+			console.log("claimFinishPlace: puesto asignado ->", me.data.finishedPlace, "tiempo:", formatTime(me.data.finishTime));
+		}else{
+			console.log("claimFinishPlace: transaccion no comprometida (committed=" + committed + ")");
+		}
+	});
+}
+
+function queueBanner(msg){
+	finishBannerQueue.push(msg);
+	showNextFinishBanner();
+}
+
+function queueFinishBanner(playerName, place){
+	console.log("queueFinishBanner:", playerName, place);
+	queueBanner(playerName.replaceAll("<", "&lt;") + " termin\u00f3 el " + place + "\u00ba");
+}
+
+function queueLastLapBanner(playerName){
+	console.log("queueLastLapBanner:", playerName);
+	queueBanner("\u00a1" + playerName.replaceAll("<", "&lt;") + " le queda una vuelta!");
+}
+
+function showNextFinishBanner(){
+	if(finishBannerShowing || finishBannerQueue.length == 0 || !finishBanner) return;
+	finishBannerShowing = true;
+	finishBanner.innerHTML = finishBannerQueue.shift();
+	finishBanner.className = "show";
+	setTimeout(function(){
+		finishBanner.className = "";
+		setTimeout(function(){
+			finishBannerShowing = false;
+			showNextFinishBanner();
+		}, 400);
+	}, 2200);
+}
+
+// Looks for any player (including ourselves) whose finish place just got confirmed and hasn't been announced yet
+function checkFinishAnnouncements(){
+	for(var pid in players){
+		var d = players[pid].data;
+		if(d && d.finishedPlace && d.finishedPlace > 0 && !announcedFinishes[pid]){
+			announcedFinishes[pid] = true;
+			queueFinishBanner(d.name, d.finishedPlace);
+		}
+	}
+}
+
+// Looks for any player who just entered their final lap and hasn't been announced yet
+function checkLastLapAnnouncements(){
+	for(var pid in players){
+		var d = players[pid].data;
+		if(d && LAPS > 1 && d.lap == LAPS - 1 && !(d.finishedPlace > 0) && !announcedLastLap[pid]){
+			announcedLastLap[pid] = true;
+			queueLastLapBanner(d.name);
+		}
+	}
+}
+
+function enterSpectatorMode(){
+	if(spectating) return;
+	console.log("enterSpectatorMode: entrando");
+	var myId = me.ref.key;
+	spectateIds = [];
+	for(var pid in players){
+		if(pid != myId) spectateIds.push(pid);
+	}
+	if(spectateIds.length == 0){
+		console.log("enterSpectatorMode: no hay a quien espectar");
+		return;
+	}
+	spectating = true;
+	spectatorUI.style.display = "flex";
+	document.getElementById("spectatePrev").style.display = "inline-block";
+	document.getElementById("spectateNext").style.display = "inline-block";
+	setSpectateTarget(0);
+}
+
+function setSpectateTarget(idx){
+	if(spectateIds.length == 0) return;
+	idx = ((idx % spectateIds.length) + spectateIds.length) % spectateIds.length;
+	spectateIndex = idx;
+
+	var myId = me.ref.key;
+
+	if(mySpectateTargetId){
+		database.ref(code + "/players/" + mySpectateTargetId + "/spectators/" + myId).remove();
+	}
+
+	mySpectateTargetId = spectateIds[spectateIndex];
+	var spectatorRef = database.ref(code + "/players/" + mySpectateTargetId + "/spectators/" + myId);
+	spectatorRef.set(true);
+	spectatorRef.onDisconnect().remove();
+
+	var targetPlayer = players[mySpectateTargetId];
+	var nameEl = document.getElementById("spectateName");
+	if(nameEl) nameEl.innerHTML = targetPlayer && targetPlayer.data ? targetPlayer.data.name.replaceAll("<", "&lt;") : "";
+}
+
+function stopSpectating(){
+	var myId = me.ref.key;
+	if(mySpectateTargetId){
+		database.ref(code + "/players/" + mySpectateTargetId + "/spectators/" + myId).remove();
+	}
+	mySpectateTargetId = null;
+	spectating = false;
+	if(spectatorUI) spectatorUI.style.display = "none";
+}
+
+function checkRaceEnd(){
+	if(resultsStartTime) return;
+	var total = 0, finished = 0;
+	for(var pid in players){
+		var d = players[pid].data;
+		if(!d) continue;
+		total++;
+		if(d.finishedPlace && d.finishedPlace > 0) finished++;
+	}
+	if(total > 0 && finished >= total){
+		resultsStartTime = Date.now();
+	}
+}
+
+function updateFinalStandings(){
+	var standings = [];
+	for(var pid in players){
+		var d = players[pid].data;
+		if(!d) continue;
+		standings.push({ name: d.name, place: d.finishedPlace || 999, lap: d.lap || 0, checkpoint: d.checkpoint || 0, finishTime: d.finishTime });
+	}
+	standings.sort(function(a, b){
+		if(a.place != b.place) return a.place - b.place;
+		if(b.lap != a.lap) return b.lap - a.lap;
+		return b.checkpoint - a.checkpoint;
+	});
+	var html = "";
+	for(var i = 0; i < standings.length; i++){
+		var s = standings[i];
+		html += "<div class='fsrow'><span class='fspos'>" + (i + 1) + "\u00ba</span><span class='fsname'>"
+			+ s.name.replaceAll("<", "&lt;").substring(0, 20) + "</span><span class='fstime'>"
+			+ formatTime(s.finishTime) + "</span></div>";
+	}
+	if(finalStandings) finalStandings.innerHTML = html;
+}
+
+function enterResultsMode(){
+	if(resultsMode) return;
+	resultsMode = true;
+	stopSpectating();
+	finalStandings = document.getElementById("finalStandings");
+	updateFinalStandings();
+	resultsOverlay.style.display = "flex";
+}
+
 function join(){
 	eval(loadMap());
 
@@ -723,12 +904,50 @@ function join(){
 		controls = new THREE.DeviceOrientationControls(camera);
 	}
 
+
+	function updateLeaderboard(){
+		if(!leaderboard) return;
+
+		var standings = [];
+
+		for(var pid in players){
+			if(me.ref && pid == me.ref.key) continue;
+			var p = players[pid];
+			if(!p.data) continue;
+			standings.push({ name: p.data.name, lap: p.data.lap || 0, checkpoint: p.data.checkpoint || 0, finishedPlace: p.data.finishedPlace > 0 ? p.data.finishedPlace : null, isMe: false });
+		}
+		standings.push({ name: me.data.name, lap: me.data.lap || 0, checkpoint: me.data.checkpoint || 0, finishedPlace: me.data.finishedPlace > 0 ? me.data.finishedPlace : null, isMe: true });
+
+		standings.sort(function(a, b){
+			var af = a.finishedPlace || Infinity;
+			var bf = b.finishedPlace || Infinity;
+			if(af != bf) return af - bf;
+			if(b.lap != a.lap) return b.lap - a.lap;
+			return b.checkpoint - a.checkpoint;
+		});
+
+		var html = "";
+		for(var i = 0; i < standings.length; i++){
+			var s = standings[i];
+			var displayLap = Math.min(s.lap, LAPS);
+			html += "<div class='lbrow" + (s.isMe ? " lbme" : "") + "'>"
+				+ "<span class='lbpos'>" + (i + 1) + "</span>"
+				+ "<span class='lbname'>" + (s.finishedPlace ? "\uD83C\uDFC1 " : "") + s.name.replaceAll("<", "&lt;").substring(0, 20) + "</span>"
+				+ "<span class='lblap'>" + displayLap + "/" + LAPS + "</span>"
+				+ "</div>";
+		}
+		leaderboard.innerHTML = html;
+	}
+
 	var lastTime = performance.now();
 	function render(timestamp) {
 		requestAnimationFrame(render);
 		var timepassed = timestamp - lastTime;
 		lastTime = timestamp;
 		var warp = timepassed / 16;
+		// Cap warp so returning from a backgrounded/inactive tab (where rAF was paused)
+		// can't cause a single giant physics step that tunnels through walls.
+		warp = Math.min(warp, 3);
 
 		if(gameStarted){
 			if(!mobile){
@@ -744,6 +963,7 @@ function join(){
 			me.data.steer = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, me.data.steer));
 
 			players[me.ref.path.pieces_[2]].data = me.data;
+			var myId = me.ref.path.pieces_[2];
 
 			if(!gameSortaStarted){
 				for(var p in players){
@@ -839,23 +1059,28 @@ function join(){
 
 					for(var i in startc.children){
 						var cp = startc.children[i];
+						var idx = parseInt(i);
 						if(Math.abs(cp.plane.distanceToPoint(play.model.position.clone().sub(cp.position))) < 1){
 							if(cp.position.clone().distanceTo(play.model.position) < cp.width / 2 + 1){
-								// console.log(i);
-								if(i == 0){
-									if(play.data.checkpoint == 1){
+								var totalCheckpoints = startc.children.length - 1;
+								if(idx == 0){
+									// Finish/start line: only counts the lap if every checkpoint was hit, in order
+									if(play.data.checkpoint >= totalCheckpoints){
 										play.data.checkpoint = 0;
 										play.data.lap++;
 									}
-								}else
-									play.data.checkpoint = 1;
+								}else{
+									// Checkpoint line: only advances if it's the next one expected, in order
+									if(play.data.checkpoint == idx - 1){
+										play.data.checkpoint = idx;
+									}
+								}
 							}
 						}
 					}
 
-					if(play.data.lap > LAPS && document.getElementById("countdown").innerHTML == ""){
-						document.getElementById("countdown").style.fontSize = "25vmin";
-						document.getElementById("countdown").innerHTML = play.data.name.replaceAll("<", "&lt;") + " Won!";
+					if(play.data.lap > LAPS && !play.data.finishedPlace && p == myId){
+						claimFinishPlace();
 					}
 
 					for(var pl in players){
@@ -896,21 +1121,70 @@ function join(){
 				}
 			}
 
-			var target = new THREE.Vector3(
-				me.model.position.x + Math.sin(-me.model.rotation.y) * 5,
-				3,
-				me.model.position.z + -Math.cos(-me.model.rotation.y) * 5
-			);
-			camera.position.set(
-				camera.position.x * Math.pow(CAMERA_LAG, warp) + target.x * (1 - Math.pow(CAMERA_LAG, warp)),
-				3,
-				camera.position.z * Math.pow(CAMERA_LAG, warp) + target.z * (1 - Math.pow(CAMERA_LAG, warp))
-			);
-			camera.lookAt(me.model.position);
+			try{
+				checkLastLapAnnouncements();
+				checkFinishAnnouncements();
+				checkRaceEnd();
+
+				if(resultsStartTime && !resultsMode && Date.now() - resultsStartTime >= 3000){
+					enterResultsMode();
+				}
+			}catch(e){
+				console.error("finish/results error:", e);
+			}
+
+			if(resultsMode){
+				camera.position.set(
+					camera.position.x * Math.pow(CAMERA_LAG, warp) + 60 * Math.sin(x * 0.3) * (1 - Math.pow(CAMERA_LAG, warp)),
+					40,
+					camera.position.z * Math.pow(CAMERA_LAG, warp) + 60 * Math.cos(x * 0.3) * (1 - Math.pow(CAMERA_LAG, warp))
+				);
+				camera.lookAt(new THREE.Vector3(0, 0, 0));
+			}else if(spectating){
+				var specPlayer = players[spectateIds[spectateIndex]];
+				if(specPlayer && specPlayer.model){
+					var specTarget = new THREE.Vector3(
+						specPlayer.model.position.x + Math.sin(-specPlayer.model.rotation.y) * 5,
+						3,
+						specPlayer.model.position.z + -Math.cos(-specPlayer.model.rotation.y) * 5
+					);
+					camera.position.set(
+						camera.position.x * Math.pow(CAMERA_LAG, warp) + specTarget.x * (1 - Math.pow(CAMERA_LAG, warp)),
+						3,
+						camera.position.z * Math.pow(CAMERA_LAG, warp) + specTarget.z * (1 - Math.pow(CAMERA_LAG, warp))
+					);
+					camera.lookAt(specPlayer.model.position);
+				}
+			}else{
+				var target = new THREE.Vector3(
+					me.model.position.x + Math.sin(-me.model.rotation.y) * 5,
+					3,
+					me.model.position.z + -Math.cos(-me.model.rotation.y) * 5
+				);
+				camera.position.set(
+					camera.position.x * Math.pow(CAMERA_LAG, warp) + target.x * (1 - Math.pow(CAMERA_LAG, warp)),
+					3,
+					camera.position.z * Math.pow(CAMERA_LAG, warp) + target.z * (1 - Math.pow(CAMERA_LAG, warp))
+				);
+				camera.lookAt(me.model.position);
+
+				if(myFinishTime && !spectating && Date.now() - myFinishTime >= 3000){
+					try{ enterSpectatorMode(); }catch(e){ console.error("enterSpectatorMode error:", e); }
+				}
+			}
 
 			me.ref.set(me.data);
 
 			lap.innerHTML = me.data.lap <= LAPS ? me.data.lap + "/" + LAPS : "";
+
+			if(raceTimerEl){
+				if(me.data.finishedPlace > 0 && me.data.finishTime != null){
+					raceTimerEl.innerHTML = formatTime(me.data.finishTime);
+				}else if(raceStartTime){
+					raceTimerEl.innerHTML = formatTime(Date.now() - raceStartTime);
+				}
+			}
+			updateLeaderboard();
 		}else{
 			camera.position.set(50 * Math.sin(x), 20, 50 * Math.cos(x));
 			camera.lookAt(player.position);
@@ -1077,7 +1351,7 @@ codeCheck = function(){
 					steer: 0,
 					color: color,
 					name: name,
-					checkpoint: 1,
+					checkpoint: 0,
 					lap: 0,
 					collision: {}
 				}
@@ -1103,6 +1377,12 @@ codeCheck = function(){
 						lap.id = "lap";
 						f.appendChild(lap);
 
+						leaderboard = document.createElement("DIV");
+						leaderboard.id = "leaderboard";
+						f.appendChild(leaderboard);
+
+						try{ createRaceHUD(f); }catch(e){ console.error("createRaceHUD error:", e); }
+
 						setTimeout(function(){
 							countDown.innerHTML = "2";
 						}, 1000);
@@ -1114,6 +1394,7 @@ codeCheck = function(){
 						setTimeout(function(){
 							countDown.innerHTML = "GO!";
 							gameSortaStarted = false;
+							raceStartTime = Date.now();
 						}, 3000);
 
 						setTimeout(function(){
