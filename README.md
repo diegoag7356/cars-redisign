@@ -1,10 +1,18 @@
-# Cars Rediseñado
+# Cars Rediseñado - 🇪🇸
 
 Este proyecto es un fork de [jchabin/cars](https://github.com/jchabin/cars).
 
 El juego original es completamente de jchabin. Yo solo hice este rediseño porque me apetecía experimentar con la interfaz y algunos flujos de juego.
 
-## Proyecto original
+# Cars Redesigned - 🏴󠁧󠁢󠁥󠁮󠁧󠁿/🇺🇸
+
+This project is a fork of [jchabin/cars](https://github.com/jchabin/cars).
+
+The original game is entirely by jchabin. I only did this redesign because I wanted to experiment with the interface and some gameplay flows.
+
+
+
+## Proyecto original / Original proyect
 
 # cars
 an online racing game im making
