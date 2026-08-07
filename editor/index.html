@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 	<head>
+		<meta charset="utf-8">
 		<!-- thanks to https://realfavicongenerator.net/ -->
 		<link rel="apple-touch-icon" sizes="180x180" href="../favicons/apple-touch-icon.png">
 		<link rel="icon" type="image/png" sizes="32x32" href="../favicons/favicon-32x32.png">
@@ -14,36 +15,90 @@
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1">
 		<link href="style.css" rel="stylesheet">
-		<title>Track Editor</title>
+		<title>Editor de pistas</title>
 	</head>
 	<body>
-		<div id="center">
+		<!-- El estilo inline garantiza que la ayuda arranque oculta aunque el CSS esté cacheado -->
+		<div id="center" style="-webkit-transform: translateY(-200vh); transform: translateY(-200vh);">
 			<div id="help" onclick="this.parentElement.style.transform='translateY(-200vh)'">
-				<h1>Track-Making Guide</h1>
+				<h1>Guía para crear pistas</h1>
 				<br/>
-				This is a track editor for my <a href="https://jchabin.github.io/cars/">Online Racing Game.</a> There are 4 different things you can place:
-				<p><b>Walls</b>- Just click and drag to make a wall.</p>
-				<p><b>Starting Lines/Checkpoints</b>- Make them the same way as you make walls. When the game uses these, it will make the first one you drew into the starting line, and the second one into the checkpoint. You can only draw one of each. (I mean, you <em>can</em> draw more, but the game won't handle it very well...)</p>
-				<p><b>Trees</b>- Trees are very simple. You just click to place one, or drag to make a whole forest!</p>
-				<p><b>Arrows</b>- Click and drag to make an arrow. You'll notice it's like a wall, but with a fixed length. Whichever way it is "pointing" will be the direction the arrow is facing.</p>
-				The three other buttons aren't objects that can be placed.
-				<p><b>Eraser</b>- You can probably figure out how this one works. The only weird thing is that when you try to erase walls or checkpoints, you don't click on the line itself, you click on the endpoint of the line. There's also <b>Ctrl-Z</b> for undo.</p>
-				<p><b>Export</b>- When you click <b>Export</b>, it opens a new tab with some numbers and symbols on it. You can just press <b>Ctrl-A</b> and <b>Ctrl-C</b> it to copy the whole thing. You use that for importing the map into the game.</p>
-				<p><b>Help</b>- Clicking here will open this menu.<p>
-				Once you've made a stellar map, you go to the <a href="https://jchabin.github.io/cars/">Online Racing Game</a> website and press <b>Ctrl-I</b> on the main menu. Paste your track code into the prompt, and you're good to go. If you host the game, all other players will also use your map. Good luck, y'all!
-				<p style="text-align: center"><b style="color: red">Click anywhere in this box to close it.</b></p>
+				Este es un editor de pistas para el <a href="https://jchabin.github.io/cars/">juego de carreras online.</a> Hay 4 cosas distintas que puedes colocar:
+				<p><b>Muros</b>: haz clic y arrastra para dibujar un muro. Usa el selector <b>Nivel (altura)</b> del panel derecho para dibujar muros elevados (nivel 1, 2...): en el juego se ven con pilares y puedes pasar por debajo de ellos.</p>
+				<p><b>Rampas</b>: dibuja un <b>rect\u00e1ngulo</b> arrastrando (ser\u00e1 la zona de la rampa). Al soltar se abre un di\u00e1logo donde eliges si sube o baja, a qu\u00e9 piso va y ves una vista lateral de c\u00f3mo quedar\u00e1. Las rampas conectan pisos (capas): al aceptar una rampa el editor cambia autom\u00e1ticamente a la capa destino para que dibujes ah\u00ed el siguiente tramo.</p>
+				<p><b>Capas (pisos)</b>: la altura entre capas es siempre la misma. En la capa 0 (suelo) solo puedes poner rampas hacia arriba; en las capas 1 y 2 puedes ponerlas hacia arriba o hacia abajo. Los objetos de capas inferiores se dibujan con l\u00edneas de puntos para que sepas d\u00f3nde est\u00e1s.</p>
+				<p><b>Línea de salida / Checkpoints</b>: se dibujan igual que los muros. El juego usa la primera como línea de salida y la segunda como checkpoint. Solo puedes dibujar una de cada. (Bueno, <em>puedes</em> dibujar más, pero el juego no lo manejará muy bien...)</p>
+				<p><b>Árboles</b>: muy sencillos. Haz clic para colocar uno, o arrastra para crear un bosque entero.</p>
+				<p><b>Flechas</b>: haz clic y arrastra para hacer una flecha. Es como un muro, pero con longitud fija. Hacia donde "apunte" será la dirección de la flecha.</p>
+				Los otros botones no son objetos que se puedan colocar.
+				<p><b>Goma (borrar)</b>: ya te imaginarás cómo funciona. Lo único raro es que para borrar muros o checkpoints no haces clic sobre la línea, sino sobre uno de sus extremos. También hay <b>Ctrl-Z</b> para deshacer.</p>
+				<p><b>Exportar</b>: al pulsar <b>Exportar</b> se abre una pestaña con números y símbolos. Pulsa <b>Ctrl-A</b> y <b>Ctrl-C</b> para copiarlo todo. Eso lo usas para importar el mapa en el juego.</p>
+				<p><b>Variables</b>: el panel de la derecha ajusta la velocidad, la escala, las montañas, las vueltas, etc. Se exportan junto al código del mapa, así no tienes que escribirlas a mano al final del código.</p>
+				<p><b>Ayuda</b>: pulsar aquí abre este menú.</p>
+				Cuando tengas una pista genial, ve al <a href="https://jchabin.github.io/cars/">juego de carreras online</a> y pulsa <b>Ctrl-I</b> en el menú principal. Pega el código de la pista en el prompt y listo. Si organizas la sala, todos los demás jugadores usarán tu mapa. ¡Buena suerte!
+				<p style="text-align: center"><b style="color: red">Haz clic en cualquier parte de esta caja para cerrarla.</b></p>
 			</div>
 		</div>
 		<div id="menu">
-			<div class="button selected" onclick="select(0)">Walls</div>
-			<div class="button" onclick="select(1)">Start</div>
-			<div class="button" onclick="select(2)">Trees</div>
-			<div class="button" onclick="select(3)">Arrows</div>
-			<div class="button" onclick="select(4)">Erase</div>
-			<div class="button" onclick="imp()">Import</div>
-			<div class="button" onclick="exp()">Export</div>
-			<div class="button" onclick="dedupTrees()">T-Dedup</div>
+			<div class="button selected" title="Paredes" onclick="select(0)">Muro</div>
+			<div class="button" title="L\u00ednea de salida / checkpoint" onclick="select(1)">Meta</div>
+			<div class="button" title="\u00c1rboles" onclick="select(2)">\u00c1rbol</div>
+			<div class="button" title="Flechas" onclick="select(3)">Flecha</div>				<div class="button" title="Rampa (sube o baja de piso)" onclick="select(4)">Rampa</div>
+			<div class="button" title="Borrar" onclick="select(5)">Goma</div>
+			<div class="button" title="Importar datos de mapa" onclick="imp()">Import</div>
+			<div class="button" title="Exportar c\u00f3digo del mapa" onclick="exp()">Export</div>
+			<div class="button" title="Quitar \u00e1rboles duplicados" onclick="dedupTrees()">Dedup</div>
 			<div class="button big" onclick="help()">?</div>
+		</div>
+		<div id="vars">
+			<div class="vartitle" onclick="toggleVars()">Variables del mapa <span id="varsArrow">&#9660;</span></div>
+			<div id="varsBody">
+				<div id="caparow">
+					<span class="varname">Capa (piso)</span>
+					<div class="varctl">
+						<button class="varbtn" onclick="adjCapa(-1)">&#8722;</button>
+						<span class="varval" id="capaval">0</span>
+						<button class="varbtn" onclick="adjCapa(1)">&#43;</button>
+					</div>
+				</div>
+				<div class="nivelshint" id="capahint">Capa 0 = suelo. Los objetos de capas inferiores se ven con l\u00edneas de puntos. Al poner una rampa cambias de capa autom\u00e1ticamente.</div>
+				<div id="varsList"></div>
+			</div>
+			<div id="zoomrow">
+				<span class="varname">Zoom de la grilla</span>
+				<div class="varctl">
+					<button class="varbtn" onclick="zoomGrid(-1)">&#8722;</button>
+					<span class="varval" id="zoomval">x1.0</span>
+					<button class="varbtn" onclick="zoomGrid(1)">&#43;</button>
+				</div>
+			</div>
+		</div>
+		<!-- Di\u00e1logo de configuraci\u00f3n de rampa: se abre al soltar el rect\u00e1ngulo -->
+		<div id="rampDialog">
+			<div class="rd-title">Configurar rampa</div>
+			<div class="rd-row">
+				<span class="rd-label">\u00bfHacia d\u00f3nde va?</span>
+				<div class="rd-dirs">
+					<div class="rd-dir" id="rdUp" onclick="setRampDir('up')">&#8593; Arriba</div>
+					<div class="rd-dir" id="rdDown" onclick="setRampDir('down')">&#8595; Abajo</div>
+				</div>
+			</div>
+			<div class="rd-row">
+				<span class="rd-label">Piso destino</span>
+				<div class="rd-floor">
+					<button class="rd-btn" onclick="adjRampFloor(-1)">&#8722;</button>
+					<span class="varval" id="rdFloorVal">1</span>
+					<button class="rd-btn" onclick="adjRampFloor(1)">&#43;</button>
+				</div>
+			</div>
+			<div class="rd-row">
+				<span class="rd-label">Vista lateral</span>
+				<canvas id="rdPreview" width="220" height="90"></canvas>
+			</div>
+			<div class="rd-actions">
+				<div class="rd-btn" onclick="cancelRamp()">Cancelar</div>
+				<div class="rd-btn rd-ok" onclick="acceptRamp()">Aceptar</div>
+			</div>
 		</div>
 		<canvas id="c"></canvas>
 		<script src="script.js"></script>

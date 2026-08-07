@@ -1,0 +1,11 @@
+# Ignorar las carpetas de agentes
+.claude/
+.agents/
+.freebuff/
+
+# Ignorar los archivos Markdown específicos
+progress.md
+transcripcion-sesion_cars-redisign.md
+
+# Lock file local del instalador de skills
+skills-lock.json

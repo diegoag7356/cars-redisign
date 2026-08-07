@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 	<head>
+		<meta charset="utf-8">
 		<!-- thanks to https://realfavicongenerator.net/ -->
 		<link rel="apple-touch-icon" sizes="180x180" href="../favicons/apple-touch-icon.png">
 		<link rel="icon" type="image/png" sizes="32x32" href="../favicons/favicon-32x32.png">
@@ -13,11 +14,11 @@
 		<meta name="apple-mobile-web-app-capable" content="yes">
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1">
-		<title>Help!</title>
+		<title>Ayuda - Cars Rediseñado</title>
 	</head>
 	<body>
 		<link href="https://fonts.googleapis.com/css?family=Nanum+Gothic" rel="stylesheet">
-		<link href="https://fonts.googleapis.com/css?family=Monoton|Press+Start+2P" rel="stylesheet">
+		<link href="https://fonts.googleapis.com/css?family=Orbitron:400,700,900|Chakra+Petch:400,600,700" rel="stylesheet">
 		<style>
 			.font{
 				font-family: "Nanum Gothic";
@@ -62,7 +63,7 @@
 			}
 			.fakebutton{
 				display: inline-block;
-				font-family: "Monoton";
+				font-family: 'Chakra Petch', sans-serif;
 				font-size: 3vmin;
 				border: 0.5vmin solid white;
 				height: 5vmin;
@@ -86,31 +87,31 @@
 			}
 		</style>
 		<div id="grey">
-			<div class="title font">What is this?</div>
+			<div class="title font">¿Qué es esto?</div>
 			<div class="body font">
-				This is my incredible <a href="https://jchabin.github.io/cars/">Online Racing Game.</a> It's a multiplayer game where you try to complete three laps before the other players. I built it with <a href="https://threejs.org/">three.js</a> and <a href="https://firebase.google.com/">Firebase.</a>
+				Este es un <b>rediseño (fork) de <a href="https://github.com/jchabin/cars">cars</a></b>, el juego de carreras online de <a href="https://jchabin.github.io/cars/">jchabin</a>. El juego original es completamente suyo: yo solo hice este rediseño de interfaz y algunos flujos, por pura experimentación. Está hecho con <a href="https://threejs.org/">three.js</a> y <a href="https://firebase.google.com/">Firebase.</a> Es un multijugador donde intentas completar tres vueltas antes que los demás.
 			</div>
-			<div class="title font">How do I play?</div>
+			<div class="title font">¿Cómo se juega?</div>
 			<div class="body font">
-				First, type in your name and use the color slider to choose the color of your car. If you want to be in charge of the game, or you want to play alone, click <div class="fakebutton">Host a Game</div> If someone else is hosting the game, press <div class="fakebutton">Join a Game</div> When hosting, have all other players type in your four-letter code to join. If someone else is hosting, type in the code on their screen.
+				Primero escribe tu nombre y usa el deslizador de color para elegir el color de tu coche. Si quieres jugar solo, elige <b>Jugar en solitario</b> (con <b>Cronometraje</b> o <b>Entrenamiento</b>). Si quieres jugar con amigos, pulsa <b>Crear una sala</b> y comparte el código, o <b>Unirse a una sala</b> e introduce el código de otra persona. Cuando todos estén listos, la carrera arrancará sola.
 				<br/>
 				<br/>
-				If you're on a computer, use the left and right arrow keys to steer. Your car will automatically drive forwards. On a phone, with or without VR mode, tilt your phone to steer.
+				En el ordenador usa las flechas izquierda y derecha para girar; el coche acelera solo. En el móvil, inclina el teléfono para girar.
 				<br/>
 				<br/>
-				Be careful not to hit other players!
+				¡Cuidado con no chocar con los demás!
 			</div>
-			<div class="title font">How does VR mode work?</div>
+			<div class="title font">¿Puedo crear mis propias pistas?</div>
 			<div class="body font">
-				You need a <a href="https://vr.google.com/cardboard/get-cardboard/">Google Cardboard</a> or similar headset for this to work. To turn on VR mode, open the settings menu <div class="circle" style="background-color: #6eb0ea"><img class="icon" src="https://jchabin.github.io/cars/gear.png"></div> and click the <div class="circle" style="background-color: #db6262"><img class="icon" src="https://jchabin.github.io/cars/cardboard.png"></div> button.
+				¡Sí! Abre el menú de ajustes <div class="circle" style="background-color: #6eb0ea"><img class="icon" src="../gear.png"></div> y pulsa el botón <div class="circle" style="background-color: #55db8f"><img class="icon" src="../newTrack.png"></div> del editor. El editor tiene las instrucciones dentro y un panel de variables (velocidad, montañas, vueltas...).
 			</div>
-			<div class="title font">Can I make my own tracks?</div>
+			<div class="title font">¿Y el control de sonido?</div>
 			<div class="body font">
-				Yes you can! Just open the settings menu <div class="circle" style="background-color: #6eb0ea"><img class="icon" src="https://jchabin.github.io/cars/gear.png"></div> and click the <div class="circle" style="background-color: #55db8f"><img class="icon" src="https://jchabin.github.io/cars/newTrack.png"></div> button! The editor has instructions inside.
+				En la pantalla de inicio hay un botón de silencio (memoriza tu preferencia), y en el menú de ajustes del juego principal tienes un deslizador de volumen.
 			</div>
-			<div class="title font">Help! I just went through the wall!</div>
+			<div class="title font">¡Ayuda! ¡Atravesé la pared!</div>
 			<div class="body font">
-				Yeah... That happens sometimes. I'm working on it. Sorry. If you're stuck outside the map, try to drive to the mountains - it sends you back to the startline.
+				Sí... eso pasa a veces. Perdona. Si te quedas fuera del mapa, conduce hacia las montañas: te devuelven a la línea de salida.
 			</div>
 		</div>
 	

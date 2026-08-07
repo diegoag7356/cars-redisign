@@ -6,6 +6,17 @@ var mapscale = 5;
 var VR = false;
 var BOUNCE_CORRECT = 0.01;
 var WALL_SIZE = 1.2;
+var LEVEL_HEIGHT = 6; // Altura (en unidades 3D) de cada nivel del mapa multinivel
+var ramps = []; // Rampas del mapa: {p1, p2 (coordenadas mundo), level}
+var elevFloors = []; // Suelos de pisos elevados (hitbox): {level, cx, cz, ux, uz, hx, vx, vz, hz}
+// Registra un suelo elevado con hitbox: rectángulo orientado en el plano XZ con
+// centro (cx,cz), semieje X = (ux,uz)*hx (a lo largo de la pared) y semieje Z =
+// (vx,vz)*hz (a lo ancho). La física lo usa para saber si el coche va sobre él.
+function registerFloor(level, cx, cz, ux, uz, hx, vx, vz, hz){
+	elevFloors.push({level: level, cx: cx, cz: cz, ux: ux, uz: uz, hx: hx, vx: vx, vz: vz, hz: hz});
+}
+var carPitch = {}; // Inclinación del coche por jugador (solo visual, no se sincroniza)
+var elevGroup = null; // Mallas decorativas de los niveles (pilares, cubiertas, rampas)
 var MOUNTAIN_DIST = 250;
 var OOB_DIST = 200;
 var LAPS = 3;
@@ -206,7 +217,6 @@ if(!mobile){
 	renderer.shadowMap.autoUpdate = false;
 	renderer.shadowMap.needsUpdate = true;
 	renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-	document.getElementById("cardboard").className += " disabled";
 	console.log(mobile);
 }
 var element = renderer.domElement;
@@ -229,6 +239,8 @@ function toggleFullScreen() {
 
 var name, code, players = {}, me = {}, gameStarted = false, gameSortaStarted = false, left = false, right = false, lap, leaderboard;
 var lobbyMapType = "preset", lobbyMapData = null, lobbyIsCustom = false, lobbyAllReady = false, lobbyIsHost = false, hostedRaceStarted = false, soloMode = null;
+var paused = false; // pausa real en modo solitario (entrenamiento)
+var originalForeHTML = document.getElementById("fore").innerHTML; // para "Salir al menú principal"
 var finishBanner, finishBannerQueue = [], finishBannerShowing = false, announcedFinishes = {};
 var myFinishTime = null, spectating = false, spectateIds = [], spectateIndex = 0;
 var spectatorUI, spectatorArrows, eyeBadge, eyeCountListenerRef = null, mySpectateTargetId = null;
@@ -258,13 +270,225 @@ color = Math.floor(Math.random() * 360);
 var f = document.getElementById("fore");
 var s = document.getElementById("slider");
 updateColor = function(){
-	s.style.marginLeft = color / 360 * 80 + "vw";
+	// Posicionar el punto según el ancho REAL del colorpicker (min(78vw,100vmin)),
+	// no un valor fijo de 80vw: así el punto coincide con el ratón y se detiene al final.
+	var cp = document.getElementById("colorpicker");
+	var w = cp ? cp.clientWidth : window.innerWidth;
+	s.style.marginLeft = color / 360 * w + "px";
 	s.style.backgroundColor = "hsl(" + color + ", 100%, 50%)";
 	document.body.style.backgroundColor = "hsl(" + color + ", 50%, 50%)";
 }
 updateColor();
+// Re-posiciona el punto al redimensionar la ventana
+window.addEventListener("resize", function(){
+	if(typeof color != "undefined" && s) updateColor();
+}, false);
+
+// ---- Intro: pantalla con bot\u00f3n "Iniciar juego" ---------------------------
+// The black overlay (#intro) first shows an "Iniciar juego" button. Clicking
+// it starts the intro video AND the music (a user click unlocks the audio,
+// so no autoplay workarounds are needed). The music then keeps playing
+// through the menus and only fades out when a race actually starts.
+var introEl = document.getElementById("intro");
+var introVideo = document.getElementById("introVideo");
+var introMusic = document.getElementById("introMusic");
+var introRevealed = false;
+var introStarted = false;
+var introMusicOn = false;   // fade-in is running
+var introMusicFade = null;
+var introVideoStart = null; // when the intro video started
+
+// --- Ajustes de sonido (volumen + silencio) con memoria localStorage -----
+var musicVolume = parseInt(localStorage.getItem("carsVolume") || "80");
+musicVolume = isNaN(musicVolume) ? 80 : Math.max(0, Math.min(100, musicVolume));
+var musicMuted = localStorage.getItem("carsMuted") == "1";
+
+function applyMusicState(){
+	if(!introMusic) return;
+	// Aplica el volumen correcto: 0 si mute, o el % guardado si no.
+	introMusic.volume = musicMuted ? 0 : musicVolume / 100;
+	var sl = document.getElementById("volSlider");
+	if(sl) sl.value = musicVolume;
+	var b1 = document.getElementById("intro-mute");
+	if(b1) b1.classList.toggle("muted", musicMuted);
+	var b2 = document.getElementById("muteBtn");
+	if(b2) b2.classList.toggle("muted", musicMuted);
+}
+
+function setVolume(v){
+	musicVolume = Math.max(0, Math.min(100, parseInt(v) || 0));
+	if(musicMuted) musicMuted = false;
+	localStorage.setItem("carsVolume", musicVolume);
+	localStorage.setItem("carsMuted", "0");
+	applyMusicState();
+}
+
+function toggleMute(){
+	musicMuted = !musicMuted;
+	localStorage.setItem("carsMuted", musicMuted ? "1" : "0");
+	applyMusicState();
+}
+
+function toggleSettings(){
+	var tb = document.getElementById("toolbar");
+	if(tb) tb.className = (tb.className.indexOf("sel") >= 0) ? "" : "sel";
+	var sl = document.getElementById("volSlider");
+	if(sl) sl.value = musicVolume;
+}
+
+function startIntroMusic(){
+	if(!introMusic || introMusicOn) return;
+	introMusicOn = true;
+	try{
+		introMusic.volume = 0;
+		var p = introMusic.play();
+		if(p && p.catch) p.catch(function(){});
+		if(introMusicFade) clearInterval(introMusicFade);
+		introMusicFade = setInterval(function(){
+			// Recalcula el objetivo en cada tick para que mute/volumen se respeten durante el fade.
+			var target = musicMuted ? 0 : musicVolume / 100;
+			if(!introMusicOn || introMusic.volume >= target){
+				clearInterval(introMusicFade);
+				introMusicFade = null;
+				return;
+			}
+			introMusic.volume = Math.min(target, introMusic.volume + 0.03);
+		}, 90);
+	}catch(e){}
+}
+
+function stopIntroMusic(){
+	if(!introMusic) return;
+	introMusicOn = false;
+	try{
+		if(introMusicFade) clearInterval(introMusicFade);
+		var fade = setInterval(function(){
+			if(!introMusic || introMusic.volume <= 0.01){
+				clearInterval(fade);
+				if(introMusic) introMusic.pause();
+				return;
+			}
+			introMusic.volume = Math.max(0, introMusic.volume - 0.03);
+		}, 60);
+	}catch(e){}
+}
+
+function revealMenu(){
+	if(introRevealed) return;
+	introRevealed = true;
+	if(introEl) introEl.classList.add("hidden");
+	setTimeout(function(){
+		if(introEl && introEl.parentNode) introEl.parentNode.removeChild(introEl);
+	}, 2200);
+}
+
+// "Saltar intro": muestra el men\u00fa inmediatamente y arranca la m\u00fasica
+// (el clic en el bot\u00f3n ya desbloquea el audio).
+function skipIntro(){
+	if(introStarted){
+		try{ introVideo.pause(); }catch(e){}
+	}
+	revealMenu();
+	startIntroMusic();
+}
+
+// Called by the "Iniciar juego" button: plays the intro video and starts the
+// music with a fade-in. Because it runs inside a user gesture, the browser
+// lets the audio play immediately (no autoplay blocking).
+function startIntroPlay(){
+	if(introStarted || introRevealed) return;
+	introStarted = true;
+	var startBtn = document.getElementById("intro-start");
+	if(startBtn) startBtn.classList.add("hide");
+	introVideoStart = Date.now();
+	try{
+		introVideo.muted = true;
+		introVideo.currentTime = 0;
+		var p = introVideo.play();
+		if(p && p.catch) p.catch(function(){ revealMenu(); });
+	}catch(e){ revealMenu(); }
+	startIntroMusic();
+}
+
+// Preload both media so the intro never stutters, and wire up the reveal.
+function runIntro(){
+	if(!introEl || !introVideo || !introMusic) return;
+	// Reveal at 8s from the video start (the song's beat kicks in there);
+	// if the video is longer, reveal when it ends instead.
+	introVideo.addEventListener("ended", function(){
+		if(introVideoStart === null) return;
+		var elapsed = Date.now() - introVideoStart;
+		var wait = Math.max(0, 8000 - elapsed);
+		setTimeout(revealMenu, wait);
+	});
+	// If the video can't load or play at all, never leave the player stuck
+	// on a black screen: reveal the menu anyway.
+	introVideo.addEventListener("error", revealMenu);
+	// Safety net: only rescue if the intro was actually started (so the
+	// "Iniciar juego" screen never vanishes on its own).
+	setTimeout(function(){
+		if(introStarted && !introRevealed) revealMenu();
+	}, 20000);
+}
+runIntro();
+applyMusicState(); // sincroniza slider/silencio con lo guardado en localStorage
+
+// ---- Cuenta atr\u00e1s F1 (sem\u00e1foro) --------------------------------------
+// Preloads the 5 traffic-light PNGs so the countdown never pops in late.
+var SEMAFORO_IMGS = [
+	"semaforo0-removebg-preview.png",
+	"semaforo1-removebg-preview.png",
+	"semaforo2-removebg-preview.png",
+	"semaforo3-removebg-preview.png",
+	"semaforo4-removebg-preview.png"
+];
+function preloadSemaforos(){
+	for(var i = 0; i < SEMAFORO_IMGS.length; i++){
+		var im = new Image();
+		im.src = SEMAFORO_IMGS[i];
+	}
+}
+preloadSemaforos();
+
+// F1-style countdown. `onGo` fires the instant the race actually starts
+// (when light 4 turns on). Cars stay locked until then.
+function startSemaforoCountdown(onGo){
+	preloadSemaforos();
+	var semi = document.createElement("DIV");
+	semi.id = "semaforo";
+	var img = document.createElement("IMG");
+	img.alt = "";
+	img.src = SEMAFORO_IMGS[0];
+	semi.appendChild(img);
+	f.appendChild(semi);
+
+	var timers = [];
+	// t=2s: light 0 slides in from the top.
+	timers.push(setTimeout(function(){ semi.classList.add("show"); }, 2000));
+	// +2s after it entered: light 1.
+	timers.push(setTimeout(function(){ img.src = SEMAFORO_IMGS[1]; }, 4000));
+	// +1s: light 2.
+	timers.push(setTimeout(function(){ img.src = SEMAFORO_IMGS[2]; }, 5000));
+	// +1s: light 3.
+	timers.push(setTimeout(function(){ img.src = SEMAFORO_IMGS[3]; }, 6000));
+	// Random 3-5s on light 3, then light 4 = GO.
+	var goAt = 6000 + 3000 + Math.random() * 2000;
+	timers.push(setTimeout(function(){
+		img.src = SEMAFORO_IMGS[4];
+		if(typeof onGo == "function") onGo();
+		// Stay 3s after the race starts, then exit upward.
+		timers.push(setTimeout(function(){
+			semi.classList.add("leave");
+			timers.push(setTimeout(function(){
+				if(semi.parentNode) semi.parentNode.removeChild(semi);
+			}, 900));
+		}, 3000));
+	}, goAt));
+}
 
 menu2 = function(){
+	// The intro music keeps playing through the menus; it only fades out
+	// when a race actually starts (see startHostedRace/startSoloGame).
 	if(mobile){
 		function reactOrientation(e){
 			var angle = screen.orientation.type == "portrait-primary" ? e.gamma : screen.orientation.type == "portrait-secondary" ? -e.gamma : screen.orientation.type == "landscape-primary" ? e.beta : screen.orientation.type == "landscape-secondary" ? -e.beta : 0;
@@ -287,7 +511,7 @@ menu2 = function(){
 		name = "Jugador sin nombre";
 	else
 		name = nameEl.value;
-	VR = document.getElementById("cardboard").className == "tools sel";
+	VR = false;
 	transitionMenu(
 		"<div class='menuitem title button menu-top' id='solo' ontouchstart='this.click()' onclick='soloMenu()'>Jugar en solitario</div>" +
 		"<div class='menuitem title button menu-bottom' id='friends' ontouchstart='this.click()' onclick='friendsMenu()'>Jugar con amigos</div>",
@@ -583,6 +807,7 @@ hostLobbySetup = function(isCustom){
 			me.data = {
 				x: carPos[0].x,
 				y: carPos[0].y,
+				h: 0,
 				xv: 0,
 				yv: 0,
 				dir: 0,
@@ -655,6 +880,8 @@ toggleReady = function(){
 
 startHostedRace = function(){
 	if(gameStarted) return;
+	// The race is starting: fade the menu music out.
+	stopIntroMusic();
 	var info = document.getElementsByClassName("info")[0];
 	if(info) info.outerHTML = "";
 	var rb = document.getElementById("readybtn");
@@ -665,14 +892,8 @@ startHostedRace = function(){
 	gameStarted = true;
 	gameSortaStarted = true;
 
-	var countDown = document.createElement("DIV");
-	countDown.innerHTML = "3";
-	countDown.className = "title";
-	countDown.id = "countdown";
-	f.appendChild(countDown);
-
 	lap = document.createElement("DIV");
-	lap.innerHTML = "1/" + LAPS;
+	lap.innerHTML = "0/" + LAPS;
 	lap.className = "title";
 	lap.id = "lap";
 	f.appendChild(lap);
@@ -683,14 +904,10 @@ startHostedRace = function(){
 
 	try{ createRaceHUD(f); }catch(e){ console.error("createRaceHUD error:", e); }
 
-	setTimeout(function(){ countDown.innerHTML = "2"; }, 1000);
-	setTimeout(function(){ countDown.innerHTML = "1"; }, 2000);
-	setTimeout(function(){
-		countDown.innerHTML = "\u00a1YA!";
+	startSemaforoCountdown(function(){
 		gameSortaStarted = false;
 		raceStartTime = Date.now();
-	}, 3000);
-	setTimeout(function(){ countDown.innerHTML = ""; }, 4000);
+	});
 }
 
 joinGame = function(){
@@ -717,12 +934,15 @@ var map, trees, signs, startc, main, joined = false;
 // render/physics code (which references `me.ref.path.pieces_[2]`) keeps
 // working without touching Firebase.
 startSoloGame = function(){
+	// The solo race is starting: fade the menu music out.
+	stopIntroMusic();
 	var myId = "me";
 	me.ref = { path: { pieces_: [code || "solo", "players", myId] }, key: myId };
 	players[myId] = {
 		data: {
 			x: carPos[0].x,
 			y: carPos[0].y,
+			h: 0,
 			xv: 0,
 			yv: 0,
 			dir: 0,
@@ -768,17 +988,14 @@ startSoloGame = function(){
 	me.model = pl.model;
 
 	gameStarted = true;
+	// Re-apply solo lap settings AFTER join() has eval'd any map variables,
+	// so a custom map with `var LAPS` can't break Entrenamiento/Cronometraje.
+	LAPS = (soloMode == "entreno") ? 999 : soloLaps;
 	// Entrenamiento skips the countdown; Cronometraje shows it.
 	if(soloMode == "crono"){
 		gameSortaStarted = true;
-		var countDown = document.createElement("DIV");
-		countDown.innerHTML = "3";
-		countDown.className = "title";
-		countDown.id = "countdown";
-		f.appendChild(countDown);
-
 			lap = document.createElement("DIV");
-			lap.innerHTML = "1/" + soloLaps;
+			lap.innerHTML = "0/" + soloLaps;
 		lap.className = "title";
 		lap.id = "lap";
 		f.appendChild(lap);
@@ -790,17 +1007,73 @@ startSoloGame = function(){
 
 		try{ createRaceHUD(f); }catch(e){ console.error("createRaceHUD error:", e); }
 
-		setTimeout(function(){ countDown.innerHTML = "2"; }, 1000);
-		setTimeout(function(){ countDown.innerHTML = "1"; }, 2000);
-		setTimeout(function(){
-			countDown.innerHTML = "\u00a1YA!";
+		startSemaforoCountdown(function(){
 			gameSortaStarted = false;
 			raceStartTime = Date.now();
-		}, 3000);
-		setTimeout(function(){ countDown.innerHTML = ""; }, 4000);
+		});
 	}
-	// Entrenamiento: nothing to render beyond the canvas (no HUD).
+	// Entrenamiento: nothing to render beyond the canvas (no HUD),
+	// pero s\u00ed a\u00f1adimos el bot\u00f3n de pausa con su men\u00fa.
+	if(soloMode == "entreno"){
+		var pauseBtn = document.createElement("DIV");
+		pauseBtn.id = "pauseBtn";
+		pauseBtn.innerHTML = "<svg viewBox='0 0 24 24' width='22' height='22' fill='currentColor'><rect x='6' y='4' width='4' height='16' rx='1'/><rect x='14' y='4' width='4' height='16' rx='1'/></svg>";
+		pauseBtn.title = "Pausa (Esc)";
+		pauseBtn.onclick = togglePause;
+		f.appendChild(pauseBtn);
+
+		var pauseMenu = document.createElement("DIV");
+		pauseMenu.id = "pauseMenu";
+		pauseMenu.innerHTML =
+			"<div class='pause-title'>Pausa</div>" +
+			"<div class='pause-btn' ontouchstart='this.click()' onclick='togglePause()'>Continuar</div>" +
+			"<div class='pause-btn pause-exit' ontouchstart='this.click()' onclick='exitToMainMenu()'>Salir al men\u00fa principal</div>";
+		f.appendChild(pauseMenu);
+	}
 };
+
+// Pausa real del modo entrenamiento: congela la f\u00edsica (el bucle de
+// render salta el bloque de juego mientras `paused` est\u00e9 activo).
+function togglePause(){
+	if(!gameStarted || soloMode != "entreno") return;
+	paused = !paused;
+	var pm = document.getElementById("pauseMenu");
+	if(pm) pm.style.display = paused ? "flex" : "none";
+	var pb = document.getElementById("pauseBtn");
+	if(pb) pb.classList.toggle("on", paused);
+}
+
+// Sale del modo solitario y restaura el men\u00fa principal original.
+function exitToMainMenu(){
+	paused = false;
+	soloMode = null;
+	gameStarted = false;
+	gameSortaStarted = false;
+	// Quitar el coche del jugador de la escena
+	if(me && me.model && me.model.parentNode) me.model.parentNode.removeChild(me.model);
+	if(me && me.label && me.label.parentNode) me.label.parentNode.removeChild(me.label);
+	var li = labels.indexOf(me.label);
+	if(li >= 0) labels.splice(li, 1);
+	players = {};
+	me = {};
+	// Limpiar HUD y elementos de pausa
+	["lap","leaderboard","raceTimer","finishBanner","pauseMenu","pauseBtn","resultsOverlay","spectatorUI","spectateName","eyeBadge","countdown","semaforo"].forEach(function(id){
+		var el = document.getElementById(id);
+		if(el && el.parentNode) el.parentNode.removeChild(el);
+	});
+	// Restaurar el men\u00fa original (guardado al cargar)
+	f.innerHTML = originalForeHTML;
+	f.style.transform = "none";
+	// Re-ejecutar la animaci\u00f3n de entrada del men\u00fa
+	setTimeout(function(){ var el = document.getElementById("title"); if(el) el.style.transform = "none"; }, 400);
+	setTimeout(function(){ var el = document.getElementsByClassName("menuitem")[0]; if(el) el.style.transform = "none"; }, 800);
+	setTimeout(function(){ var el = document.getElementsByClassName("menuitem")[1]; if(el) el.style.transform = "none"; }, 1000);
+	setTimeout(function(){ var el = document.getElementsByClassName("menuitem")[2]; if(el) el.style.transform = "none"; }, 1200);
+	setTimeout(function(){ var el = document.getElementById("settings"); if(el) el.style.transform = "none"; }, 1500);
+	// La m\u00fasica del men\u00fa vuelve a sonar y se resincroniza el control de volumen
+	if(introMusic && introMusic.paused && !musicMuted) startIntroMusic();
+	applyMusicState();
+}
 
 function deleteMap(){
 	if(!map) return;
@@ -819,35 +1092,544 @@ function deleteMap(){
 	while(main.children.length > 0)
 		main.remove(main.children[0]);
 	scene.remove(main);
+	if(elevGroup){
+		while(elevGroup.children.length > 0)
+			elevGroup.remove(elevGroup.children[0]);
+		scene.remove(elevGroup);
+		elevGroup = null;
+	}
+	ramps = [];
+	elevFloors = [];
+}
+
+// Crea la malla 3D de una rampa: un prisma con la superficie inclinada que sube
+// (o baja) del piso `from` al piso `to`. a y b son las dos esquinas opuestas del
+// rect\u00e1ngulo en coordenadas de rejilla; la altura en cada punto sigue la
+// proyecci\u00f3n sobre la diagonal a->b, igual que la f\u00edsica.
+function rampAxisT(g, a, b){
+	// Interpola a lo largo del eje dominante del rectángulo: así la entrada
+	// y la salida de la rampa quedan niveladas (no inclinadas hacia un lado)
+	// y las rampas dibujadas en horizontal o vertical se ven correctamente.
+	var dx = b.x - a.x, dy = b.y - a.y;
+	if(Math.abs(dx) >= Math.abs(dy))
+		return dx == 0 ? 0 : Math.max(0, Math.min(1, (g.x - a.x) / dx));
+	return dy == 0 ? 0 : Math.max(0, Math.min(1, (g.y - a.y) / dy));
+}
+
+// Devuelve la altura (en pisos) de la rampa en un punto del mundo, o null si no hay rampa.
+// Se usa para inclinar el coche según la pendiente real de la rampa.
+function rampHeightAt(wx, wz){
+	var pad = 1.2;
+	for(var r = 0; r < ramps.length; r++){
+		var rp = ramps[r];
+		if(wx < Math.min(rp.ax, rp.bx) - pad || wx > Math.max(rp.ax, rp.bx) + pad ||
+		   wz < Math.min(rp.az, rp.bz) - pad || wz > Math.max(rp.az, rp.bz) + pad)
+			continue;
+		var gp = new THREE.Vector2(-wx / mapscale, wz / mapscale);
+		var t = rampAxisT(gp, rp.a, rp.b);
+		return rp.from + (rp.to - rp.from) * t;
+	}
+	return null;
+}
+
+function buildRampMesh(a, b, from, to){
+	var hF = from * LEVEL_HEIGHT, hT = to * LEVEL_HEIGHT;
+	var d = b.clone().sub(a);
+	var len2 = d.lengthSq();
+	if(len2 < 0.001) return null;
+	var gCorners = [a, new THREE.Vector2(b.x, a.y), b, new THREE.Vector2(a.x, b.y)];
+	var top = [], bot = [];
+	for(var i = 0; i < 4; i++){
+		var g = gCorners[i];
+		var t = rampAxisT(g, a, b);
+		var h = hF + (hT - hF) * t;
+		var p = new THREE.Vector3(-g.x * mapscale, h, g.y * mapscale);
+		top.push(p);
+		bot.push(p.clone().add(new THREE.Vector3(0, -0.25, 0)));
+	}
+	var verts = [];
+	function tri(p1, p2, p3){
+		verts.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z);
+	}
+	// Cara superior inclinada (dos tri\u00e1ngulos)
+	tri(top[0], top[1], top[2]);
+	tri(top[0], top[2], top[3]);
+	// Cara inferior
+	tri(bot[0], bot[2], bot[1]);
+	tri(bot[0], bot[3], bot[2]);
+	// Laterales
+	for(var i = 0; i < 4; i++){
+		var j = (i + 1) % 4;
+		tri(top[i], top[j], bot[j]);
+		tri(top[i], bot[j], bot[i]);
+	}
+	var geo = new THREE.BufferGeometry();
+	// El juego carga three.js r86, donde el método es addAttribute (setAttribute solo existe desde r110)
+	geo.addAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+	geo.computeVertexNormals();
+	var mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({color: new THREE.Color("#2a2a2a"), side: THREE.DoubleSide}));
+	mesh.castShadow = true;
+	mesh.receiveShadow = true;
+	return mesh;
+}
+
+// ---- Ayudas de entorno: hierba, muros de circuito y asfalto ----
+// Crea la textura de hierba (verde con motas) para el suelo.
+function makeGrassTexture(){
+	try{
+		var c = document.createElement("canvas");
+		c.width = 64; c.height = 64;
+		var ctx = c.getContext("2d");
+		if(!ctx) return null;
+		ctx.fillStyle = "#3c8a2c";
+		ctx.fillRect(0, 0, 64, 64);
+		for(var i = 0; i < 500; i++){
+			var r = 30 + Math.floor(Math.random() * 50);
+			var g = 110 + Math.floor(Math.random() * 90);
+			var b = 25 + Math.floor(Math.random() * 35);
+			ctx.fillStyle = "rgba(" + r + "," + g + "," + b + ",0.45)";
+			var s = Math.random() * 2 + 1;
+			ctx.fillRect(Math.random() * 64, Math.random() * 64, s, s);
+		}
+		var tex = new THREE.CanvasTexture(c);
+		tex.wrapS = THREE.RepeatWrapping;
+		tex.wrapT = THREE.RepeatWrapping;
+		tex.repeat.set(160, 160);
+		return tex;
+	}catch(e){
+		return null;
+	}
+}
+
+// Crea el material de los muros tipo circuito indoor: blanco con franjas
+// diagonales rojas, repetido a lo largo de la pared según su longitud.
+function makeStripedWallMaterial(width){
+	try{
+		if(typeof document.createElement != "function") return null;
+		var c = document.createElement("canvas");
+		c.width = 128; c.height = 128;
+		var ctx = c.getContext("2d");
+		if(!ctx) return null;
+		ctx.fillStyle = "#f5f5f5";
+		ctx.fillRect(0, 0, 128, 128);
+		ctx.fillStyle = "#c1121f";
+		ctx.save();
+		ctx.translate(64, 64);
+		ctx.rotate(Math.PI / 4);
+		for(var i = -128; i <= 192; i += 42){
+			ctx.fillRect(i, -128, 21, 256);
+		}
+		ctx.restore();
+		var tex = new THREE.CanvasTexture(c);
+		tex.wrapS = THREE.RepeatWrapping;
+		tex.wrapT = THREE.RepeatWrapping;
+		tex.repeat.set(Math.max(0.5, width / 2), 0.75);
+		return new THREE.MeshLambertMaterial({map: tex});
+	}catch(e){
+		return null;
+	}
+}
+
+// Distancia de un punto a un segmento (plano XZ).
+function distToSeg2(px, pz, x1, z1, x2, z2){
+	var dx = x2 - x1, dz = z2 - z1;
+	var len2 = dx * dx + dz * dz;
+	if(len2 < 0.0001) return Math.sqrt((px - x1) * (px - x1) + (pz - z1) * (pz - z1));
+	var t = ((px - x1) * dx + (pz - z1) * dz) / len2;
+	t = Math.max(0, Math.min(1, t));
+	var qx = x1 + t * dx, qz = z1 + t * dz;
+	return Math.sqrt((px - qx) * (px - qx) + (pz - qz) * (pz - qz));
+}
+
+// Pinta de concreto negro el circuito de nivel 0 (la zona cerrada entre los
+// muros), dejando la hierba en todo lo que no es pista. Usa relleno por
+// inundación sobre una rejilla: lo que queda fuera del bucle es hierba.
+function generateAsphalt(){
+	var tcode = document.getElementById("trackcode");
+	var racedata = tcode.innerHTML.trim().split("|")[0].trim().split(" ");
+	var segs = [];
+	for(var i = 0; i < racedata.length; i++){
+		if(racedata[i] == "") continue;
+		var tok = racedata[i];
+		var lvl = 0;
+		var at = tok.indexOf("@");
+		if(at >= 0){
+			lvl = parseInt(tok.substring(at + 1)) || 0;
+			tok = tok.substring(0, at);
+		}
+		if(lvl != 0) continue; // solo muros de suelo
+		var pts = tok.split("/");
+		if(pts.length < 2) continue;
+		var a = pts[0].split(","), b = pts[1].split(",");
+		if(a.length < 2 || b.length < 2) continue;
+		segs.push({
+			x1: -parseInt(a[0]) * mapscale, z1: parseInt(a[1]) * mapscale,
+			x2: -parseInt(b[0]) * mapscale, z2: parseInt(b[1]) * mapscale
+		});
+	}
+	if(segs.length < 3) return;
+	var minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+	for(var i = 0; i < segs.length; i++){
+		var s = segs[i];
+		minX = Math.min(minX, s.x1, s.x2); maxX = Math.max(maxX, s.x1, s.x2);
+		minZ = Math.min(minZ, s.z1, s.z2); maxZ = Math.max(maxZ, s.z1, s.z2);
+	}
+	var span = Math.max(maxX - minX, maxZ - minZ);
+	var CELL = span / 110; // ~110 celdas en el eje largo
+	CELL = Math.min(4, Math.max(1.0, CELL));
+	var PAD = 4;
+	var gx0 = Math.floor(minX / CELL) - Math.ceil(PAD / CELL);
+	var gx1 = Math.floor(maxX / CELL) + Math.ceil(PAD / CELL);
+	var gz0 = Math.floor(minZ / CELL) - Math.ceil(PAD / CELL);
+	var gz1 = Math.floor(maxZ / CELL) + Math.ceil(PAD / CELL);
+	var W = gx1 - gx0 + 1, H = gz1 - gz0 + 1;
+	// distancia mínima de cada celda a los muros (y celda de muro)
+	var WALL_HALF = 0.3 / 2 + 0.35;
+	var ROAD_HALF = 6; // mitad de la anchura de la carretera
+	var dmin = [];
+	for(var x = 0; x < W; x++){
+		dmin[x] = [];
+		for(var z = 0; z < H; z++){
+			var cxw = (gx0 + x) * CELL, czw = (gz0 + z) * CELL;
+			var d = Infinity;
+			for(var i = 0; i < segs.length; i++){
+				var s = segs[i];
+				d = Math.min(d, distToSeg2(cxw, czw, s.x1, s.z1, s.x2, s.z2));
+			}
+			dmin[x][z] = d;
+		}
+	}
+	// relleno por inundación desde el borde: lo alcanzable es "fuera"
+	var out = [];
+	for(var x = 0; x < W; x++){ out[x] = []; for(var z = 0; z < H; z++) out[x][z] = false; }
+	var stack = [];
+	for(var x = 0; x < W; x++){
+		for(var z = 0; z < H; z++){
+			if((x == 0 || z == 0 || x == W - 1 || z == H - 1) && dmin[x][z] >= WALL_HALF){
+				out[x][z] = true;
+				stack.push([x, z]);
+			}
+		}
+	}
+	while(stack.length){
+		var c = stack.pop();
+		var x = c[0], z = c[1];
+		if(x > 0 && dmin[x-1][z] >= WALL_HALF && !out[x-1][z]){ out[x-1][z] = true; stack.push([x-1, z]); }
+		if(x < W-1 && dmin[x+1][z] >= WALL_HALF && !out[x+1][z]){ out[x+1][z] = true; stack.push([x+1, z]); }
+		if(z > 0 && dmin[x][z-1] >= WALL_HALF && !out[x][z-1]){ out[x][z-1] = true; stack.push([x, z-1]); }
+		if(z < H-1 && dmin[x][z+1] >= WALL_HALF && !out[x][z+1]){ out[x][z+1] = true; stack.push([x, z+1]); }
+	}
+	// asfalto: interior (no muro, no fuera) y cerca de un muro (la pista)
+	var asphaltMat = new THREE.MeshLambertMaterial({color: new THREE.Color(0x222222)});
+	for(var z = 0; z < H; z++){
+		var x = 0;
+		while(x < W){
+			if(dmin[x][z] < WALL_HALF || out[x][z] || dmin[x][z] >= ROAD_HALF){ x++; continue; }
+			var x0 = x;
+			while(x < W && dmin[x][z] >= WALL_HALF && !out[x][z] && dmin[x][z] < ROAD_HALF) x++;
+			var x1 = x - 1;
+			var w = (x1 - x0 + 1) * CELL;
+			// profundidad exacta CELL: un solape de 0.05 entre filas adyacentes causaba z-fighting
+			var box = new THREE.Mesh(
+				new THREE.BoxBufferGeometry(w + 0.05, 0.05, CELL),
+				asphaltMat
+			);
+			box.position.set((gx0 + (x0 + x1) / 2) * CELL, 0.025, (gz0 + z) * CELL);
+			box.receiveShadow = true;
+			elevGroup.add(box);
+		}
+	}
 }
 
 function loadMap(){
-	var racedata = document.getElementById("trackcode").innerHTML.trim().split("|")[0].trim().split(" ");
-	var material = new THREE.MeshLambertMaterial({color: new THREE.Color(0xf48342)});
-	//var mapscale = 7;
+	// Apply custom map variables (5th section of the code, e.g. SPEED = 0.004;)
+	// BEFORE building the scene so mapscale/MOUNTAIN_DIST/etc. take effect immediately.
+	// Note: innerHTML/textContent, NOT innerText - #trackcode is display:none and
+	// innerText returns "" on hidden elements in most browsers.
+	var tcode = document.getElementById("trackcode");
+	var varsCode = tcode.textContent.trim().split("|")[4];
+	if(varsCode && varsCode.trim()){
+		try{ eval(varsCode); }catch(e){ console.error("Error en variables del mapa:", e); }
+	}
+	// Mínimo 3 vueltas en cualquier carrera personalizada (los mapas no pueden
+	// forzar carreras de 1-2 vueltas; el 999 del Entrenamiento queda intacto).
+	if(LAPS < 3) LAPS = 3;
+	var racedata = tcode.innerHTML.trim().split("|")[0].trim().split(" ");
+	var material = new THREE.MeshLambertMaterial({color: new THREE.Color(0xf48342)});	//var mapscale = 7;
 	map = new THREE.Object3D();
+	elevGroup = new THREE.Object3D();
+	var pillarMat = new THREE.MeshLambertMaterial({color: new THREE.Color("#777")});
+	var deckMat = new THREE.MeshLambertMaterial({color: new THREE.Color("#8a8a8a")});
+	var elevWalls = []; // Muros elevados, para generar los suelos entre paredes después
 	for(var i = 0; i < racedata.length; i++){
 		if(racedata[i] == "")
 			continue;
-		var point1 = new THREE.Vector2(parseInt(racedata[i].split("/")[0].split(",")[0]), parseInt(racedata[i].split("/")[0].split(",")[1]));
-		var point2 = new THREE.Vector2(parseInt(racedata[i].split("/")[1].split(",")[0]), parseInt(racedata[i].split("/")[1].split(",")[1]));
+		var wallToken = racedata[i];
+		var wallLevel = 0;
+		var atIdx = wallToken.indexOf("@");
+		if(atIdx >= 0){
+			wallLevel = parseInt(wallToken.substring(atIdx + 1)) || 0;
+			wallToken = wallToken.substring(0, atIdx);
+		}
+		var point1 = new THREE.Vector2(parseInt(wallToken.split("/")[0].split(",")[0]), parseInt(wallToken.split("/")[0].split(",")[1]));
+		var point2 = new THREE.Vector2(parseInt(wallToken.split("/")[1].split(",")[0]), parseInt(wallToken.split("/")[1].split(",")[1]));
 		var wall = new THREE.Mesh(
 			new THREE.BoxBufferGeometry(point1.distanceTo(point2) * mapscale + 0.3, 1.5, 0.3),
-			material
+			makeStripedWallMaterial(point1.distanceTo(point2) * mapscale) || material
 		);
 		var angle = Math.atan2((point1.y - point2.y), (point1.x - point2.x));
-		wall.position.set(-(point1.x + point2.x) / 2 * mapscale, 0.75, (point1.y + point2.y) / 2 * mapscale);
+		wall.position.set(-(point1.x + point2.x) / 2 * mapscale, 0.75 + wallLevel * LEVEL_HEIGHT, (point1.y + point2.y) / 2 * mapscale);
 		wall.rotation.set(0, angle, 0, "YXZ");
+		wall.level = wallLevel;
 		var plane = new THREE.Plane(new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), angle));
 		wall.plane = plane;
 		wall.width = point1.distanceTo(point2) * mapscale;
+		// Posiciones mundo de los extremos (antes de mutar point1/point2)
+		var p1w = new THREE.Vector3(-point1.x * mapscale, 0, point1.y * mapscale);
+		var p2w = new THREE.Vector3(-point2.x * mapscale, 0, point2.y * mapscale);
 		wall.p1 = point1.multiply(new THREE.Vector2(-mapscale, mapscale));
 		wall.p2 = point2.multiply(new THREE.Vector2(-mapscale, mapscale));
 		wall.castShadow = true;
 		wall.receiveShadow = true;
 		map.add(wall);
+
+		if(wallLevel > 0){
+			// Pilares en ambos extremos del muro elevado
+			[p1w, p2w].forEach(function(pw){
+				var pillar = new THREE.Mesh(new THREE.BoxBufferGeometry(0.4, wallLevel * LEVEL_HEIGHT, 0.4), pillarMat);
+				pillar.position.set(pw.x, wallLevel * LEVEL_HEIGHT / 2, pw.z);
+				pillar.castShadow = true;
+				pillar.receiveShadow = true;
+				elevGroup.add(pillar);
+			});
+			elevWalls.push(wall);
+		}
 	}
+
+	// ---- Suelos de pisos elevados (detecta pasillos entre paredes) ----
+	// 1) Agrupa los muros colineales del mismo piso en tramos continuos.
+	var wallLists = {};
+	for(var wi = 0; wi < elevWalls.length; wi++){
+		var w = elevWalls[wi];
+		(wallLists[w.level] = wallLists[w.level] || []).push(w);
+	}
+	// Separación máx. entre paredes paralelas para considerarlas un pasillo
+	// (en unidades 3D; generosa para que se rellene cualquier carretera).
+	var MAX_SPAN = Math.max(20, mapscale * 8);
+	var DEF_DECK = 3.25; // ancho del borde por defecto de un muro sin pared vecina
+	for(var lvl in wallLists){
+		var walls = wallLists[lvl];
+		// 1) tramos (runs) colineales del mismo piso
+		var runs = [];
+		for(var i = 0; i < walls.length; i++){
+			var w = walls[i];
+			var wdx = w.p2.x - w.p1.x, wdz = w.p2.y - w.p1.y;
+			var wlen = Math.sqrt(wdx * wdx + wdz * wdz);
+			if(wlen < 0.001) continue;
+			wdx /= wlen; wdz /= wlen;
+			var placed = false;
+			for(var r = 0; r < runs.length && !placed; r++){
+				var run = runs[r];
+				if(Math.abs(wdx * run.dx + wdz * run.dz) < 0.995) continue; // no colineal
+				// distancia perpendicular del muro al eje del tramo
+				var px = w.p1.x - run.x0, pz = w.p1.y - run.z0;
+				if(Math.abs(px * run.nx + pz * run.nz) > 0.35) continue; // otra línea
+				var t1 = px * run.dx + pz * run.dz;
+				var t2 = t1 + wlen * (wdx * run.dx + wdz * run.dz);
+				if(Math.max(t1, t2) < run.tMin - 0.3 || Math.min(t1, t2) > run.tMax + 0.3) continue; // separados
+				run.tMin = Math.min(run.tMin, t1, t2);
+				run.tMax = Math.max(run.tMax, t1, t2);
+				placed = true;
+			}
+			if(!placed){
+				runs.push({
+					x0: w.p1.x, z0: w.p1.y,
+					dx: wdx, dz: wdz, nx: -wdz, nz: wdx,
+					tMin: 0, tMax: wlen, rotY: w.rotation.y,
+					leftCov: [], rightCov: [], corrW: 0
+				});
+			}
+		}
+		// coordenadas físicas de cada tramo según su intervalo [tMin,tMax]
+		for(var r = 0; r < runs.length; r++){
+			var run = runs[r];
+			run.len = run.tMax - run.tMin;
+			run.p1x = run.x0 + run.dx * run.tMin; run.p1z = run.z0 + run.dz * run.tMin;
+			run.p2x = run.x0 + run.dx * run.tMax; run.p2z = run.z0 + run.dz * run.tMax;
+			run.cx = (run.p1x + run.p2x) / 2; run.cz = (run.p1z + run.p2z) / 2;
+		}
+		// 2) Suelos de pasillo: rellena TODO el hueco entre dos paredes paralelas
+		//    enfrentadas (de pared a pared) a lo largo de su solape.
+		for(var i = 0; i < runs.length; i++){
+			var A = runs[i];
+			var bestR = null, bestRd = Infinity, bestRp = 0;
+			for(var j = 0; j < runs.length; j++){
+				if(j == i) continue;
+				var B = runs[j];
+				if(Math.abs(A.dx * B.dx + A.dz * B.dz) < 0.85) continue; // no paralelas
+				var vx = B.cx - A.cx, vz = B.cz - A.cz;
+				var proj = vx * A.nx + vz * A.nz;
+				var adist = Math.abs(proj);
+				if(adist < 1.5 || adist > MAX_SPAN) continue;
+				if(proj > 0 && adist < bestRd){ bestR = B; bestRd = adist; bestRp = proj; }
+			}
+			// Solo se crea el suelo cuando la vecina está al lado +normal (así cada
+			// pareja se genera una única vez; la otra lo registrará como cubierto).
+			if(bestR){
+				var B = bestR;
+				A.corrW = Math.max(A.corrW, Math.abs(bestRp));
+				B.corrW = Math.max(B.corrW, Math.abs(bestRp));
+				// solape de ambos tramos sobre el eje de A
+				var tb1 = (B.p1x - A.p1x) * A.dx + (B.p1z - A.p1z) * A.dz;
+				var tb2 = (B.p2x - A.p1x) * A.dx + (B.p2z - A.p1z) * A.dz;
+				var lo = Math.max(0, Math.min(tb1, tb2));
+				var hi = Math.min(A.len, Math.max(tb1, tb2));
+				if(hi - lo >= 0.5){
+					var tMid = (lo + hi) / 2;
+					var cx = A.p1x + A.dx * tMid + A.nx * (bestRp / 2);
+					var cz = A.p1z + A.dz * tMid + A.nz * (bestRp / 2);
+					var deck = new THREE.Mesh(
+						new THREE.BoxBufferGeometry(hi - lo + 0.3, 0.25, Math.abs(bestRp)),
+						deckMat
+					);
+					deck.position.set(cx, parseInt(lvl) * LEVEL_HEIGHT - 0.15, cz);
+					deck.rotation.set(0, A.rotY, 0, "YXZ");
+					deck.receiveShadow = true;
+					elevGroup.add(deck);
+					registerFloor(parseInt(lvl), cx, cz, A.dx, A.dz, (hi - lo + 0.3) / 2, A.nx, A.nz, Math.abs(bestRp) / 2);
+					// registrar intervalos cubiertos (con margen para no solapar bordes)
+					A.rightCov.push([lo - 0.25, hi + 0.25]);
+					var ta1 = (A.p1x - B.p1x) * B.dx + (A.p1z - B.p1z) * B.dz;
+					var ta2 = (A.p2x - B.p1x) * B.dx + (A.p2z - B.p1z) * B.dz;
+					var plo = Math.max(0, Math.min(ta1, ta2));
+					var phi = Math.min(B.len, Math.max(ta1, ta2));
+					B.leftCov.push([plo - 0.25, phi + 0.25]);
+				}
+			}
+		}
+		// 3) Bordes por defecto en las zonas no cubiertas por un pasillo.
+		var levelY = parseInt(lvl) * LEVEL_HEIGHT - 0.15;
+		for(var i = 0; i < runs.length; i++){
+			var A = runs[i];
+			var emitDeck = function(lo, hi, sideSign){
+				var tMid = (lo + hi) / 2;
+				var cx = A.p1x + A.dx * tMid + A.nx * (sideSign * DEF_DECK / 2);
+				var cz = A.p1z + A.dz * tMid + A.nz * (sideSign * DEF_DECK / 2);
+				var deck = new THREE.Mesh(
+					new THREE.BoxBufferGeometry(Math.max(0.5, hi - lo + 0.2), 0.25, DEF_DECK),
+					deckMat
+				);
+				deck.position.set(cx, levelY, cz);
+				deck.rotation.set(0, A.rotY, 0, "YXZ");
+				deck.receiveShadow = true;
+				elevGroup.add(deck);
+				registerFloor(parseInt(lvl), cx, cz, A.dx, A.dz, Math.max(0.5, hi - lo + 0.2) / 2, A.nx, A.nz, DEF_DECK / 2);
+			};
+			var addDeckSide = function(sideSign){
+				var cov = sideSign > 0 ? A.rightCov : A.leftCov;
+				// huecos = [0,len] menos los intervalos cubiertos
+				var cursor = 0;
+				for(var k = 0; k < cov.length; k++){
+					var clo = Math.max(0, cov[k][0]), chi = Math.min(A.len, cov[k][1]);
+					if(chi <= clo) continue;
+					if(clo > cursor + 0.05) emitDeck(cursor, clo, sideSign);
+					if(chi > cursor) cursor = chi;
+				}
+				if(A.len - cursor > 0.05) emitDeck(cursor, A.len, sideSign);
+			};
+			addDeckSide(1);
+			addDeckSide(-1);
+		}
+		// 4) Esquinas: rellena la unión de dos tramos que se encuentran en ángulo
+		//    (curvas y esquinas) para que el suelo del nivel sea continuo y con hitbox.
+		var cornerDist = Math.max(2, DEF_DECK);
+		var cornerSeen = {};
+		for(var i = 0; i < runs.length; i++){
+			var A = runs[i];
+			var aEnds = [[A.p1x, A.p1z], [A.p2x, A.p2z]];
+			for(var j = i + 1; j < runs.length; j++){
+				var B = runs[j];
+				if(Math.abs(A.dx * B.dx + A.dz * B.dz) >= 0.85) continue; // paralelas: el pasillo ya las une
+				var bEnds = [[B.p1x, B.p1z], [B.p2x, B.p2z]];
+				for(var ea = 0; ea < 2; ea++){
+					for(var eb = 0; eb < 2; eb++){
+						var dxe = aEnds[ea][0] - bEnds[eb][0];
+						var dze = aEnds[ea][1] - bEnds[eb][1];
+						var dd = Math.sqrt(dxe * dxe + dze * dze);
+						if(dd > cornerDist) continue;
+						var key = i + "_" + j + "_" + ea + "_" + eb;
+						if(cornerSeen[key]) continue;
+						cornerSeen[key] = true;
+						// punto de unión (mitad entre los dos extremos cercanos)
+						var jx = (aEnds[ea][0] + bEnds[eb][0]) / 2;
+						var jz = (aEnds[ea][1] + bEnds[eb][1]) / 2;
+						// tamaño: cubre el pasillo más ancho de los dos tramos
+						var wA = A.corrW || DEF_DECK;
+						var wB = B.corrW || DEF_DECK;
+						var side = Math.max(wA, wB) + 1;
+						// orientación: bisectriz de las dos direcciones
+						var angA = Math.atan2(A.dz, A.dx);
+						var angB = Math.atan2(B.dz, B.dx);
+						var diff = angB - angA;
+						while(diff > Math.PI) diff -= Math.PI * 2;
+						while(diff < -Math.PI) diff += Math.PI * 2;
+						var mid = angA + diff / 2;
+						var corner = new THREE.Mesh(
+							new THREE.BoxBufferGeometry(side, 0.25, side),
+							deckMat
+						);
+						corner.position.set(jx, levelY - 0.02, jz);
+						corner.rotation.set(0, mid, 0, "YXZ");
+						corner.receiveShadow = true;
+						elevGroup.add(corner);
+						registerFloor(parseInt(lvl), jx, jz, Math.cos(mid), Math.sin(mid), side / 2, -Math.sin(mid), Math.cos(mid), side / 2);
+					}
+				}
+			}
+		}
+	}
+	generateAsphalt();
 	scene.add(map);
+
+	// ---- Rampas (secci\u00f3n 6: x1,y1/x2,y2@from-to) - rect\u00e1ngulo que conecta dos pisos ----
+	ramps = [];
+	var rampdataRaw = tcode.innerHTML.trim().split("|")[5];
+	if(rampdataRaw && rampdataRaw.trim()){
+		var rampTokens = rampdataRaw.trim().split(" ");
+		for(var i = 0; i < rampTokens.length; i++){
+			if(rampTokens[i] == "")
+				continue;
+			var rt = rampTokens[i];
+			var rFrom = 0, rTo = 1;
+			var atI = rt.indexOf("@");
+			if(atI >= 0){
+				var fl = rt.substring(atI + 1);
+				var dash = fl.indexOf("-");
+				if(dash >= 0){
+					rFrom = parseInt(fl.substring(0, dash)) || 0;
+					rTo = parseInt(fl.substring(dash + 1)) || 0;
+				}else{
+					rFrom = parseInt(fl) || 0;
+					rTo = rFrom + 1;
+				}
+				rt = rt.substring(0, atI);
+			}
+			var pts = rt.split("/");
+			if(pts.length < 2)
+				continue;
+			var ra = new THREE.Vector2(parseInt(pts[0].split(",")[0]), parseInt(pts[0].split(",")[1]));
+			var rb = new THREE.Vector2(parseInt(pts[1].split(",")[0]), parseInt(pts[1].split(",")[1]));
+			ramps.push({
+				a: ra, b: rb, from: rFrom, to: rTo,
+				ax: -ra.x * mapscale, az: ra.y * mapscale,
+				bx: -rb.x * mapscale, bz: rb.y * mapscale
+			});
+			var rampMesh = buildRampMesh(ra, rb, rFrom, rTo);
+			if(rampMesh)
+				elevGroup.add(rampMesh);
+		}
+	}
+	scene.add(elevGroup);
 
 	trees = new THREE.Object3D();
 	var tree = new THREE.Mesh(
@@ -917,9 +1699,13 @@ function loadMap(){
 	stripes.wrapS = THREE.RepeatWrapping;
 	stripes.wrapT = THREE.RepeatWrapping;
 	stripes.repeat.set(100, 100);
+	var grassTex = makeGrassTexture();
+	var groundMat = grassTex
+		? new THREE.MeshLambertMaterial({color: new THREE.Color(0xffffff), map: grassTex})
+		: new THREE.MeshLambertMaterial({color: new THREE.Color(0x57c115), emissive: new THREE.Color(0x0f0f0f), emissiveMap: stripes});
 	var ground = new THREE.Mesh(
 		new THREE.PlaneBufferGeometry(1000, 1000),
-		new THREE.MeshLambertMaterial({color: new THREE.Color(0x57c115), emissive: new THREE.Color(0x0f0f0f), emissiveMap: stripes})
+		groundMat
 	);
 	ground.rotation.set(-Math.PI / 2, 0, 0);
 	ground.receiveShadow = true;
@@ -938,7 +1724,7 @@ function loadMap(){
 	}
 	scene.add(main);
 
-	return document.getElementById("trackcode").innerText.trim().split("|")[4];
+	return varsCode;
 }
 
 function createRaceHUD(container){
@@ -1287,7 +2073,7 @@ function join(){
 		// can't cause a single giant physics step that tunnels through walls.
 		warp = Math.min(warp, 3);
 
-		if(gameStarted){
+		if(gameStarted && !paused){
 			if(!mobile){
 				if(left)
 					me.data.steer = Math.PI / 6;
@@ -1318,9 +2104,100 @@ function join(){
 					play.data.x += play.data.xv * warp;
 					play.data.y += play.data.yv * warp;
 
+					// ---- Multinivel: altura del coche (h) ----
+					if(play.data.h == null) play.data.h = 0;
+					var targetH = 0;
+					var onRamp = false;
+					var pos2d = new THREE.Vector2(play.data.x, play.data.y);
+					for(var r = 0; r < ramps.length; r++){
+						var rp = ramps[r];
+						// \u00bfEst\u00e1 el coche dentro del rect\u00e1ngulo de la rampa (con margen)?
+						var pad = 1.2;
+						if(play.data.x < Math.min(rp.ax, rp.bx) - pad || play.data.x > Math.max(rp.ax, rp.bx) + pad ||
+						   play.data.y < Math.min(rp.az, rp.bz) - pad || play.data.y > Math.max(rp.az, rp.bz) + pad)
+							continue;
+						var gp = new THREE.Vector2(-play.data.x / mapscale, play.data.y / mapscale);
+						var t = rampAxisT(gp, rp.a, rp.b);
+						targetH = rp.from + (rp.to - rp.from) * t;
+						onRamp = true;
+						break;
+					}
+					// Suelo con hitbox bajo el coche: el nivel más alto de suelo elevado que
+					// contiene al coche y que está a la altura del coche (o por debajo).
+					// Si el coche está bajo un paso elevado, ese suelo se ignora (no sube).
+					if(!onRamp){
+						var floorLvl = 0;
+						for(var fi = 0; fi < elevFloors.length; fi++){
+							var fl = elevFloors[fi];
+						if(fl.level < 1 || fl.level > play.data.h + 0.15) continue;
+						var rx = play.data.x - fl.cx, rz = play.data.y - fl.cz;
+						var along = rx * fl.ux + rz * fl.uz;
+						var across = rx * fl.vx + rz * fl.vz;
+						if(Math.abs(along) <= fl.hx + 0.5 && Math.abs(across) <= fl.hz + 0.5 && fl.level > floorLvl)
+							floorLvl = fl.level;
+						}
+						if(floorLvl > 0){
+							targetH = floorLvl;
+						}else{
+							targetH = 0;
+							// Compatibilidad: si no hay suelo bajo el coche pero está junto a un
+							// muro elevado de su nivel actual, se mantiene arriba (mapas antiguos).
+							var curLvl = Math.round(play.data.h);
+							if(curLvl > 0){
+								for(var w in map.children){
+									var wall = map.children[w];
+									if(!wall.level || wall.level != curLvl) continue;
+									var wap = pos2d.clone().sub(wall.p1);
+									var wab = wall.p2.clone().sub(wall.p1);
+									var wabLen2 = wab.lengthSq();
+									if(wabLen2 < 0.001) continue;
+									var wt = Math.max(0, Math.min(1, wap.dot(wab) / wabLen2));
+									var wclosest = wall.p1.clone().add(wab.clone().multiplyScalar(wt));
+									if(pos2d.distanceTo(wclosest) < 3.2){
+										targetH = curLvl;
+										break;
+									}
+								}
+							}
+						}
+					}
+					if(targetH < play.data.h - 0.05 && !onRamp)
+						play.data.falling = true;
+					// Gravedad: sobre una rampa el coche sigue la superficie casi al
+					// momento (sobre todo al bajar, para que no flote); al caer, baja
+					// rápido; en llano/soportado, transición suave.
+					var hRate = onRamp ? 0.5 : (play.data.falling ? 0.3 : 0.08);
+					play.data.h += (targetH - play.data.h) * Math.min(1, hRate * warp);
+					play.data.h = Math.max(0, play.data.h);
+					if(play.data.h <= 0.05)
+						play.data.falling = false;
+
 					play.model.position.x = play.data.x + play.data.xv;
+					play.model.position.y = 0.6 + play.data.h * LEVEL_HEIGHT;
 					play.model.position.z = play.data.y + play.data.yv;
+
+					// ---- Inclinación del coche según la pendiente de la rampa ----
+					// Mide la altura real de la rampa delante y detrás del coche en su
+					// dirección de marcha y calcula el ángulo de inclinación (pitch).
+					// La velocidad no cambia: solo se rota el modelo para que parezca
+					// que sube/baja la cuesta en lugar de atravesarla. Se guarda en
+					// carPitch (no en play.data) para no sincronizarlo por Firebase.
+					var pitchTarget = 0;
+					var fwdStep = 2; // unidades de mundo por delante
+					var hNow = rampHeightAt(play.data.x, play.data.y);
+					var hAhead = rampHeightAt(
+						play.data.x + Math.sin(play.data.dir) * fwdStep,
+						play.data.y + Math.cos(play.data.dir) * fwdStep
+					);
+					if(hNow != null && hAhead != null)
+						pitchTarget = Math.atan2((hAhead - hNow) * LEVEL_HEIGHT, fwdStep);
+					if(carPitch[p] == null) carPitch[p] = 0;
+					carPitch[p] += (pitchTarget - carPitch[p]) * Math.min(1, 0.12 * warp);
+					// order 'YXZ': primero el giro (dir) sobre Y y luego el cabeceo sobre
+					// el eje lateral local del coche, que es lo que queremos para las rampas.
+					play.model.rotation.order = "YXZ";
 					play.model.rotation.y = play.data.dir;
+					play.model.rotation.x = -carPitch[p];
 
 					play.model.children[0].rotation.z = Math.PI / 2 - play.data.steer;
 					play.model.children[1].rotation.z = Math.PI / 2 - play.data.steer;
@@ -1345,9 +2222,12 @@ function join(){
 
 					for(var w in map.children){
 						var wall = map.children[w];
+						if(wall.level != Math.floor(play.data.h + 0.05)) continue;
 						var posi = new THREE.Vector2(play.data.x, play.data.y);
 						if(Math.abs(wall.plane.distanceToPoint(play.model.position.clone().sub(wall.position))) < WALL_SIZE){
-							if(wall.position.clone().distanceTo(play.model.position) < wall.width / 2){
+							// Distancia 2D (ignorando Y): con pistas multinivel el coche puede estar por debajo/encima
+							var wallDist2d = Math.hypot(wall.position.x - play.model.position.x, wall.position.z - play.model.position.z);
+							if(wallDist2d < wall.width / 2){
 								var vel = new THREE.Vector3(play.data.xv, 0, play.data.yv);
 								vel.reflect(wall.plane.normal);
 								play.data.xv = vel.x + BOUNCE_CORRECT * wall.plane.normal.x * Math.sign(wall.plane.normal.dot(play.model.position.clone().sub(wall.position)));
@@ -1398,6 +2278,7 @@ function join(){
 					for(var i in startc.children){
 						var cp = startc.children[i];
 						var idx = parseInt(i);
+						if(Math.round(play.data.h) != 0) break; // Los checkpoints solo cuentan en nivel 0
 						if(Math.abs(cp.plane.distanceToPoint(play.model.position.clone().sub(cp.position))) < 1){
 							if(cp.position.clone().distanceTo(play.model.position) < cp.width / 2 + 1){
 								var totalCheckpoints = startc.children.length - 1;
@@ -1417,7 +2298,7 @@ function join(){
 						}
 					}
 
-					if(play.data.lap > LAPS && !play.data.finishedPlace && p == myId){
+					if(play.data.lap >= LAPS && !play.data.finishedPlace && p == myId){
 						if(soloMode == "crono"){
 							// Solo cronometraje: just record our own finish locally.
 							me.data.finishedPlace = 1;
@@ -1462,6 +2343,7 @@ function join(){
 					if(play.model.position.distanceTo(new THREE.Vector3()) > OOB_DIST){
 						play.data.x = 0;
 						play.data.y = 0;
+						play.data.h = 0;
 					}
 				}
 			}
@@ -1490,28 +2372,35 @@ function join(){
 				if(specPlayer && specPlayer.model){
 					var specTarget = new THREE.Vector3(
 						specPlayer.model.position.x + Math.sin(-specPlayer.model.rotation.y) * 5,
-						3,
+						(specPlayer.model.position.y || 0) + 2.4,
 						specPlayer.model.position.z + -Math.cos(-specPlayer.model.rotation.y) * 5
 					);
 					camera.position.set(
 						camera.position.x * Math.pow(CAMERA_LAG, warp) + specTarget.x * (1 - Math.pow(CAMERA_LAG, warp)),
-						3,
+						camera.position.y * Math.pow(CAMERA_LAG, warp) + specTarget.y * (1 - Math.pow(CAMERA_LAG, warp)),
 						camera.position.z * Math.pow(CAMERA_LAG, warp) + specTarget.z * (1 - Math.pow(CAMERA_LAG, warp))
 					);
 					camera.lookAt(specPlayer.model.position);
 				}
 			}else{
+				var camY = (me.model.position.y || 0) + 2.4;
 				var target = new THREE.Vector3(
 					me.model.position.x + Math.sin(-me.model.rotation.y) * 5,
-					3,
+					camY,
 					me.model.position.z + -Math.cos(-me.model.rotation.y) * 5
 				);
 				camera.position.set(
 					camera.position.x * Math.pow(CAMERA_LAG, warp) + target.x * (1 - Math.pow(CAMERA_LAG, warp)),
-					3,
+					camera.position.y * Math.pow(CAMERA_LAG, warp) + camY * (1 - Math.pow(CAMERA_LAG, warp)),
 					camera.position.z * Math.pow(CAMERA_LAG, warp) + target.z * (1 - Math.pow(CAMERA_LAG, warp))
 				);
-				camera.lookAt(me.model.position);
+				// En bajadas (pitch negativo) inclinamos la cámara hacia abajo para ver
+				// más carretera; en subidas se deja igual.
+				var myPitch = carPitch[myId] || 0;
+				var lookY = me.model.position.y;
+				if(myPitch < -0.02)
+					lookY += myPitch * 5;
+				camera.lookAt(new THREE.Vector3(me.model.position.x, lookY, me.model.position.z));
 
 				if(myFinishTime && !spectating && Date.now() - myFinishTime >= 3000){
 					try{ enterSpectatorMode(); }catch(e){ console.error("enterSpectatorMode error:", e); }
@@ -1520,7 +2409,7 @@ function join(){
 
 			if(typeof me.ref.set == "function" && !soloMode) me.ref.set(me.data);
 
-			if(lap) lap.innerHTML = me.data.lap <= LAPS && soloMode != "entreno" ? Math.max(1, me.data.lap) + "/" + LAPS : "";
+			if(lap) lap.innerHTML = me.data.lap <= LAPS && soloMode != "entreno" ? me.data.lap + "/" + LAPS : "";
 
 			if(raceTimerEl && soloMode != "entreno"){
 				if(me.data.finishedPlace > 0 && me.data.finishTime != null){
@@ -1530,7 +2419,7 @@ function join(){
 				}
 			}
 			if(soloMode != "entreno") updateLeaderboard();
-		}else{
+		}else if(!paused){
 			camera.position.set(50 * Math.sin(x), 20, 50 * Math.cos(x));
 			camera.lookAt(player.position);
 		}
@@ -1738,6 +2627,7 @@ codeCheck = function(){
 				me.data = {
 					x: carPos[playerCount] && carPos[playerCount].x != null ? carPos[playerCount].x : 0,
 					y: carPos[playerCount] && carPos[playerCount].y != null ? carPos[playerCount].y : 0,
+					h: 0,
 					xv: 0,
 					yv: 0,
 					dir: 0,
@@ -1777,6 +2667,8 @@ window.onkeydown = function(e){
 		left = true;
 	if(e.keyCode == 39)
 		right = true;
+	if(e.keyCode == 27) // Esc: pausa/contin\u00faa en entrenamiento
+		togglePause();
 }
 
 window.onkeyup = function(e){
