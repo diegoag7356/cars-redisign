@@ -48,17 +48,16 @@ for(var i = 0; i < serverList.length; i++){
 			la.analytics();
 		}catch{}
 	}
-    	let tm = setTimeout(function(){
-    	    la.delete();
-    	}, 5000);
 	la.auth().signInAnonymously().then(() => {
-		database = la.database();
-		database.ref("/testServer").once("value", function(e){
-            		clearTimeout(tm);
+		// No se publica la base de datos hasta comprobar que responde. Antes se
+		// asignaba aquí y un timeout de 5 s eliminaba `la` si la comprobación
+		// tardaba más: los botones conservaban una referencia ya borrada.
+		var candidateDatabase = la.database();
+		candidateDatabase.ref("/testServer").once("value", function(e){
 			if(connectedN >= 0 && connectedN > li)
 				connectedS.delete();
 			if(connectedN < 0 || connectedN > li){
-				database = la.database();
+				database = candidateDatabase;
 				connectedN = li;
 				connectedS = la;
 			}else{
