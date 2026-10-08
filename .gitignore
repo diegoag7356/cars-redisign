@@ -3,9 +3,9 @@
 .agents/
 .freebuff/
 
-# Ignorar los archivos Markdown específicos
-progress.md
-transcripcion-sesion_cars-redisign.md
+# Ignorar todos los Markdown excepto el README
+*.md
+!README.md
 
 # Lock file local del instalador de skills
 skills-lock.json

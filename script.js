@@ -1201,8 +1201,10 @@ function makeGrassTexture(){
 	}
 }
 
-// Crea el material de los muros tipo circuito indoor: blanco con franjas
-// diagonales rojas, repetido a lo largo de la pared según su longitud.
+// Crea el material de los muros tipo circuito: valla clásica de carreras con
+// bandas horizontales rojas y blancas (estilo karting/F1), uniformes a lo largo
+// de todo el muro. Las antiguas franjas diagonales envolvían el muro como un
+// bastón de caramelo, así que se sustituyen por bandas horizontales.
 function makeStripedWallMaterial(width){
 	try{
 		if(typeof document.createElement != "function") return null;
@@ -1210,20 +1212,23 @@ function makeStripedWallMaterial(width){
 		c.width = 128; c.height = 128;
 		var ctx = c.getContext("2d");
 		if(!ctx) return null;
-		ctx.fillStyle = "#f5f5f5";
+		// Variante C: gris claro con franja roja delgada en el borde superior
+		// (estilo barrera de hormigón con aviso, la elegida por el usuario).
+		ctx.fillStyle = "#c7ccd4";
 		ctx.fillRect(0, 0, 128, 128);
-		ctx.fillStyle = "#c1121f";
-		ctx.save();
-		ctx.translate(64, 64);
-		ctx.rotate(Math.PI / 4);
-		for(var i = -128; i <= 192; i += 42){
-			ctx.fillRect(i, -128, 21, 256);
-		}
-		ctx.restore();
+		ctx.fillStyle = "#e0352b";
+		ctx.fillRect(0, 0, 128, 15); // ~12% de la altura del muro
 		var tex = new THREE.CanvasTexture(c);
 		tex.wrapS = THREE.RepeatWrapping;
 		tex.wrapT = THREE.RepeatWrapping;
-		tex.repeat.set(Math.max(0.5, width / 2), 0.75);
+		// El alto del muro (1.5) mapea la textura completa: las bandas quedan
+		// bien proporcionadas en cualquier longitud de muro, sin repetición.
+		tex.repeat.set(1, 1);
+		// Anisotropía para que las bandas no se emborronen al mirar muros largos
+		// de reflón (ángulo de visión muy cerrado).
+		if(typeof renderer != "undefined" && renderer && renderer.capabilities){
+			tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+		}
 		return new THREE.MeshLambertMaterial({map: tex});
 	}catch(e){
 		return null;
@@ -1681,7 +1686,10 @@ function loadMap(){
 			new THREE.MeshLambertMaterial({color: new THREE.Color(i == 0 ? "#2580db" : "#db2525")})
 		);
 		var angle = Math.atan2((point1.y - point2.y), (point1.x - point2.x));
-		wall.position.set(-(point1.x + point2.x) / 2 * mapscale, 0, (point1.y + point2.y) / 2 * mapscale);
+		// Línea elevada a 0.06 para que su cara superior (0.11) quede por encima
+		// de la del asfalto (0.05): antes coincidían exactamente y provocaban
+		// z-fighting (la meta y los checkpoints parpadeaban / se glitcheaban).
+		wall.position.set(-(point1.x + point2.x) / 2 * mapscale, 0.06, (point1.y + point2.y) / 2 * mapscale);
 		wall.rotation.set(0, angle, 0, "YXZ");
 		var plane = new THREE.Plane(new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), angle));
 		wall.plane = plane;
