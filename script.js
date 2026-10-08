@@ -657,7 +657,7 @@ host = function(){
 
 hostCreatePreset = function(){
 	lobbyMapType = "preset";
-	hostLobbySetup(false);
+	hostStartRoom(false, "mappreset");
 }
 
 hostCreateCustom = function(){
@@ -683,7 +683,38 @@ hostCreateCustomGo = function(){
 		return;
 	}
 	lobbyMapData = md.value.trim();
-	hostLobbySetup(true);
+	hostStartRoom(true, "mapstart");
+}
+
+// Firebase termina de autenticar de forma asíncrona. Antes se intentaba crear
+// la sala inmediatamente y, si el jugador pulsaba rápido, `database` todavía
+// era undefined y el menú parecía no responder.
+hostStartRoom = function(isCustom, buttonId){
+	var button = document.getElementById(buttonId);
+	var originalLabel = button ? button.innerHTML : "Continuar";
+	if(button){
+		button.onclick = null;
+		button.style.pointerEvents = "none";
+		button.innerHTML = "Conectando...";
+	}
+
+	var startedAt = Date.now();
+	var waitForDatabase = setInterval(function(){
+		if(database && typeof database.ref == "function"){
+			clearInterval(waitForDatabase);
+			hostLobbySetup(isCustom);
+			return;
+		}
+		if(Date.now() - startedAt >= 10000){
+			clearInterval(waitForDatabase);
+			if(button){
+				button.onclick = function(){ hostStartRoom(isCustom, buttonId); };
+				button.style.pointerEvents = "";
+				button.innerHTML = originalLabel;
+			}
+			alert("No se ha podido conectar al servidor. Comprueba tu conexión e inténtalo de nuevo.");
+		}
+	}, 100);
 }
 
 // Creates the room in Firebase and shows the lobby (ready-check) screen.
