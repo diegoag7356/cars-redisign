@@ -25,7 +25,8 @@
 				<br/>
 				Este es un editor de pistas para el <a href="https://jchabin.github.io/cars/">juego de carreras online.</a> Hay 4 cosas distintas que puedes colocar:
 				<p><b>Muros</b>: haz clic y arrastra para dibujar un muro. Usa el selector <b>Nivel (altura)</b> del panel derecho para dibujar muros elevados (nivel 1, 2...): en el juego se ven con pilares y puedes pasar por debajo de ellos.</p>
-				<p><b>Rampas</b>: dibuja un <b>rect\u00e1ngulo</b> arrastrando (ser\u00e1 la zona de la rampa). Al soltar se abre un di\u00e1logo donde eliges si sube o baja, a qu\u00e9 piso va y ves una vista lateral de c\u00f3mo quedar\u00e1. Las rampas conectan pisos (capas): al aceptar una rampa el editor cambia autom\u00e1ticamente a la capa destino para que dibujes ah\u00ed el siguiente tramo.</p>
+				<p><b>Rampas</b>: dibuja un <b>rect\u00e1ngulo</b> arrastrando (ser\u00e1 la zona de la rampa). Al soltar se abre un di\u00e1logo donde eliges si sube o baja, a qu\u00e9 piso va y ves una vista lateral de c\u00f3mo quedar\u00e1. Las rampas conectan pisos (capas): al aceptar una rampa el editor cambia autom\u00e1ticamente a la capa destino para que dibujes ah\u00ed el siguiente tramo. En el juego, el coche solo monta una rampa si toca su superficie: una rampa que cruce por encima de una carretera no arrastra a quien pase por debajo.</p>
+				<p><b>Vista 3D</b>: el bot\u00f3n <b>3D</b> abre una previsualizaci\u00f3n del propio juego, con el circuito centrado y girando autom\u00e1ticamente. Es solo visualizaci\u00f3n: vuelve al editor para modificar la pista.</p>
 				<p><b>Capas (pisos)</b>: la altura entre capas es siempre la misma. En la capa 0 (suelo) solo puedes poner rampas hacia arriba; en las capas 1 y 2 puedes ponerlas hacia arriba o hacia abajo. Los objetos de capas inferiores se dibujan con l\u00edneas de puntos para que sepas d\u00f3nde est\u00e1s.</p>
 				<p><b>Línea de salida / Checkpoints</b>: se dibujan igual que los muros. El juego usa la primera como línea de salida y la segunda como checkpoint. Solo puedes dibujar una de cada. (Bueno, <em>puedes</em> dibujar más, pero el juego no lo manejará muy bien...)</p>
 				<p><b>Árboles</b>: muy sencillos. Haz clic para colocar uno, o arrastra para crear un bosque entero.</p>
@@ -49,6 +50,7 @@
 			<div class="button" title="Exportar c\u00f3digo del mapa" onclick="exp()">Export</div>
 			<div class="button" title="Quitar \u00e1rboles duplicados" onclick="dedupTrees()">Dedup</div>
 			<div class="button big" onclick="help()">?</div>
+			<div class="button" id="btn3d" title="Previsualizar el circuito en el juego" onclick="toggle3D()">Vista 3D</div>
 		</div>
 		<div id="vars">
 			<div class="vartitle" onclick="toggleVars()">Variables del mapa <span id="varsArrow">&#9660;</span></div>
@@ -64,14 +66,7 @@
 				<div class="nivelshint" id="capahint">Capa 0 = suelo. Los objetos de capas inferiores se ven con l\u00edneas de puntos. Al poner una rampa cambias de capa autom\u00e1ticamente.</div>
 				<div id="varsList"></div>
 			</div>
-			<div id="zoomrow">
-				<span class="varname">Zoom de la grilla</span>
-				<div class="varctl">
-					<button class="varbtn" onclick="zoomGrid(-1)">&#8722;</button>
-					<span class="varval" id="zoomval">x1.0</span>
-					<button class="varbtn" onclick="zoomGrid(1)">&#43;</button>
-				</div>
-			</div>
+			<div id="zoomhint" class="nivelshint">La grilla usa zoom fijo (x4); no se puede cambiar.</div>
 		</div>
 		<!-- Di\u00e1logo de configuraci\u00f3n de rampa: se abre al soltar el rect\u00e1ngulo -->
 		<div id="rampDialog">
@@ -91,16 +86,26 @@
 					<button class="rd-btn" onclick="adjRampFloor(1)">&#43;</button>
 				</div>
 			</div>
-			<div class="rd-row">
-				<span class="rd-label">Vista lateral</span>
-				<canvas id="rdPreview" width="220" height="90"></canvas>
+		<div class="rd-row">
+			<span class="rd-label">Vista lateral</span>
+			<canvas id="rdPreview" width="220" height="90"></canvas>
+		</div>
+		<div class="rd-row">
+			<span class="rd-label">Dirección de la subida</span>
+			<div class="rd-dirs">
+				<div class="rd-dir" id="rdSideN" title="El extremo superior queda arriba" onclick="setRampSide('n')">&#8593;</div>
+				<div class="rd-dir" id="rdSideS" title="El extremo superior queda abajo" onclick="setRampSide('s')">&#8595;</div>
+				<div class="rd-dir" id="rdSideE" title="El extremo que sube queda a la derecha" onclick="setRampSide('e')">&#8594;</div>
+				<div class="rd-dir" id="rdSideW" title="El extremo que sube queda a la izquierda" onclick="setRampSide('w')">&#8592;</div>
 			</div>
+		</div>
 			<div class="rd-actions">
 				<div class="rd-btn" onclick="cancelRamp()">Cancelar</div>
 				<div class="rd-btn rd-ok" onclick="acceptRamp()">Aceptar</div>
 			</div>
 		</div>
 		<canvas id="c"></canvas>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/86/three.min.js"></script>
 		<script src="script.js"></script>
 	</body>
 </html>

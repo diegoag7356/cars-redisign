@@ -7,6 +7,12 @@ var VR = false;
 var BOUNCE_CORRECT = 0.01;
 var WALL_SIZE = 1.2;
 var LEVEL_HEIGHT = 6; // Altura (en unidades 3D) de cada nivel del mapa multinivel
+// Distancia m\u00e1xima (en pisos) entre el coche y la superficie de una rampa
+// para considerar que est\u00e1 en contacto con ella. Solo asi se "monta" la
+// rampa: estar dentro del rect\u00e1ngulo en planta no basta, as\u00ed que una rampa
+// que pasa por encima de una carretera ya no arrastra hacia arriba al coche
+// que circula por debajo.
+var RAMP_CONTACT = 0.12;
 var ramps = []; // Rampas del mapa: {p1, p2 (coordenadas mundo), level}
 var elevFloors = []; // Suelos de pisos elevados (hitbox): {level, cx, cz, ux, uz, hx, vx, vz, hz}
 // Registra un suelo elevado con hitbox: rectángulo orientado en el plano XZ con
@@ -26,49 +32,55 @@ function MODS(){
 
 }
 
+var TRACK_PREVIEW = new URLSearchParams(window.location.search).get("trackPreview") == "1";
+var previewCenter = new THREE.Vector3(0, 0, 0);
+var previewRadius = 35;
+
 var serverList = [
 	{
-		apiKey: "AIzaSyDVdhuxy7e5R8zdd7Qw9HvC9AFR70dLmG0",
-		authDomain: "cars-realtime-database.firebaseapp.com",
-		databaseURL: "https://cars-realtime-database-default-rtdb.europe-west1.firebasedatabase.app",
-		projectId: "cars-realtime-database",
-		storageBucket: "cars-realtime-database.firebasestorage.app",
-		messagingSenderId: "992285748221",
-		appId: "1:992285748221:web:64a1d3d6447a22a9ac4794"
+		apiKey: "AIzaSyCG5C9fzQXIajFNekePPUDKdgWOp1Sav8I",
+		authDomain: "cars-redisign-realtimedatabase.firebaseapp.com",
+		databaseURL: "https://cars-redisign-realtimedatabase-default-rtdb.europe-west1.firebasedatabase.app",
+		projectId: "cars-redisign-realtimedatabase",
+		storageBucket: "cars-redisign-realtimedatabase.firebasestorage.app",
+		messagingSenderId: "305457975710",
+		appId: "1:305457975710:web:478ba2bcdc5269cef1868f",
+		measurementId: "G-KTB83L1Z0S"
 	},
 ];
 
 var database, connectedN = -1, connectedS = undefined;
-for(var i = 0; i < serverList.length; i++){
-	firebase.initializeApp(serverList[i], "server" + i);
-	let li = i;
-	let la = firebase.apps[i];
-	if(i == 0){
-		try{
-			la.analytics();
-		}catch{}
-	}
-	la.auth().signInAnonymously().then(() => {
-		// No se publica la base de datos hasta comprobar que responde. Antes se
-		// asignaba aquí y un timeout de 5 s eliminaba `la` si la comprobación
-		// tardaba más: los botones conservaban una referencia ya borrada.
-		var candidateDatabase = la.database();
-		candidateDatabase.ref("/testServer").once("value", function(e){
-			if(connectedN >= 0 && connectedN > li)
-				connectedS.delete();
-			if(connectedN < 0 || connectedN > li){
-				database = candidateDatabase;
-				connectedN = li;
-				connectedS = la;
-			}else{
+if(!TRACK_PREVIEW){
+	for(var i = 0; i < serverList.length; i++){
+		firebase.initializeApp(serverList[i], "server" + i);
+		let li = i;
+		let la = firebase.apps[i];
+		if(i == 0){
+			try{
+				la.analytics();
+			}catch{}
+		}
+		la.auth().signInAnonymously().then(() => {
+			var candidateDatabase = la.database();
+			candidateDatabase.ref("/testServer").once("value", function(e){
+				if(connectedN >= 0 && connectedN > li)
+					connectedS.delete();
+				if(connectedN < 0 || connectedN > li){
+					database = candidateDatabase;
+					connectedN = li;
+					connectedS = la;
+				}else{
+					la.delete();
+				}
+			}, function(e){
+				console.error("[Firebase] El servidor " + li + " no responde en la base de datos:", (e && e.code) || e);
 				la.delete();
-			}
+			});
 		}, function(e){
+			console.error("[Firebase] No se pudo iniciar sesión en el servidor " + li + ":", (e && e.code) || e);
 			la.delete();
 		});
-	}, function(e){
-		la.delete();
-	});
+	}
 }
 
 /*var config = {
@@ -193,9 +205,14 @@ database.ref("/testServer").once("value", function(e){
 	}
 }); */
 
-if(top != self) {
+if(!TRACK_PREVIEW && top != self) {
 	document.getElementById("warning").style.display = "block";
+} else if(TRACK_PREVIEW){
+	document.documentElement.style.background = "#7fb0ff";
+	document.body.style.background = "#7fb0ff";
 }
+
+window.setEditorTrackPreview = setEditorTrackPreview;
 
 function forceScroll(){
 	requestAnimationFrame(forceScroll);
@@ -411,7 +428,7 @@ function startIntroPlay(){
 
 // Preload both media so the intro never stutters, and wire up the reveal.
 function runIntro(){
-	if(!introEl || !introVideo || !introMusic) return;
+	if(TRACK_PREVIEW || !introEl || !introVideo || !introMusic) return;
 	// Reveal at 8s from the video start (the song's beat kicks in there);
 	// if the video is longer, reveal when it ends instead.
 	introVideo.addEventListener("ended", function(){
@@ -1147,8 +1164,12 @@ function rampAxisT(g, a, b){
 }
 
 // Devuelve la altura (en pisos) de la rampa en un punto del mundo, o null si no hay rampa.
-// Se usa para inclinar el coche según la pendiente real de la rampa.
-function rampHeightAt(wx, wz){
+// Se usa para inclinar el coche según la pendiente real de la rampa. Con
+// `carH` (altura del coche) solo devuelve la rampa si el coche está en
+// contacto con su superficie, igual que la física: así un coche que circula
+// por una carretera situada bajo una rampa no se inclina como si la
+// estuviera subiendo.
+function rampHeightAt(wx, wz, carH){
 	var pad = 1.2;
 	for(var r = 0; r < ramps.length; r++){
 		var rp = ramps[r];
@@ -1157,10 +1178,73 @@ function rampHeightAt(wx, wz){
 			continue;
 		var gp = new THREE.Vector2(-wx / mapscale, wz / mapscale);
 		var t = rampAxisT(gp, rp.a, rp.b);
-		return rp.from + (rp.to - rp.from) * t;
+		var h = rp.from + (rp.to - rp.from) * t;
+		// Mismo criterio de contacto que la física (ver RAMP_CONTACT).
+		if(carH != null && Math.abs(h - carH) > RAMP_CONTACT)
+			continue;
+		return h;
 	}
 	return null;
 }
+
+function buildRampGuardMesh(a, b, from, to){
+	var dx = b.x - a.x, dy = b.y - a.y;
+	var length = Math.max(Math.abs(dx), Math.abs(dy)) * mapscale;
+	var width = Math.min(Math.abs(dx), Math.abs(dy)) * mapscale;
+	if(length < 1 || width < 1) return null;
+	var alongX = Math.abs(dx) >= Math.abs(dy);
+	var posts = new THREE.Object3D();
+	var railMat = new THREE.MeshLambertMaterial({color: new THREE.Color("#e8e8e8")});
+	var postMat = new THREE.MeshLambertMaterial({color: new THREE.Color("#d94b3d")});
+	var railHeight = 0.9;
+	var minX = Math.min(a.x, b.x), maxX = Math.max(a.x, b.x);
+	var minY = Math.min(a.y, b.y), maxY = Math.max(a.y, b.y);
+	for(var side = 0; side < 2; side++){
+		var g1 = alongX
+			? new THREE.Vector2(minX, side ? maxY : minY)
+			: new THREE.Vector2(side ? maxX : minX, minY);
+		var g2 = alongX
+			? new THREE.Vector2(maxX, side ? maxY : minY)
+			: new THREE.Vector2(side ? maxX : minX, maxY);
+		var h1 = (from + (to - from) * rampAxisT(g1, a, b)) * LEVEL_HEIGHT;
+		var h2 = (from + (to - from) * rampAxisT(g2, a, b)) * LEVEL_HEIGHT;
+		var p1 = new THREE.Vector3(-g1.x * mapscale, h1 + railHeight, g1.y * mapscale);
+		var p2 = new THREE.Vector3(-g2.x * mapscale, h2 + railHeight, g2.y * mapscale);
+		var direction = p2.clone().sub(p1);
+		var railLength = direction.length();
+		var rail = new THREE.Mesh(new THREE.BoxBufferGeometry(railLength, 0.18, 0.22), railMat);
+		rail.position.copy(p1).add(p2).multiplyScalar(0.5);
+		rail.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), direction.normalize());
+		rail.castShadow = true;
+		rail.receiveShadow = true;
+		// La valla también es una pared física, con extremos para la colisión del juego.
+		var p1xz = new THREE.Vector2(p1.x, p1.z), p2xz = new THREE.Vector2(p2.x, p2.z);
+		var angle = Math.atan2(p1.z - p2.z, p1.x - p2.x);
+		rail.plane = new THREE.Plane(new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), angle));
+		rail.p1 = p1xz;
+		rail.p2 = p2xz;
+		rail.guardY1 = p1.y;
+		rail.guardY2 = p2.y;
+		rail.width = p1xz.distanceTo(p2xz);
+		rail.level = Math.min(from, to);
+		rail.isRampGuard = true;
+		map.add(rail);
+
+		var postCount = Math.max(2, Math.ceil(length / 3) + 1);
+		for(var p = 0; p < postCount; p++){
+			var t = p / (postCount - 1);
+			var gp = new THREE.Vector2(g1.x + (g2.x - g1.x) * t, g1.y + (g2.y - g1.y) * t);
+			var surfaceY = (from + (to - from) * rampAxisT(gp, a, b)) * LEVEL_HEIGHT;
+			var post = new THREE.Mesh(new THREE.BoxBufferGeometry(0.22, railHeight, 0.22), postMat);
+			post.position.set(-gp.x * mapscale, surfaceY + railHeight / 2, gp.y * mapscale);
+			post.castShadow = true;
+			post.receiveShadow = true;
+			posts.add(post);
+		}
+	}
+	return posts;
+}
+
 
 function buildRampMesh(a, b, from, to){
 	var hF = from * LEVEL_HEIGHT, hT = to * LEVEL_HEIGHT;
@@ -1279,10 +1363,83 @@ function distToSeg2(px, pz, x1, z1, x2, z2){
 // Pinta de concreto negro el circuito de nivel 0 (la zona cerrada entre los
 // muros), dejando la hierba en todo lo que no es pista. Usa relleno por
 // inundación sobre una rejilla: lo que queda fuera del bucle es hierba.
+// Recopila los rectángulos (en coordenadas mundo) de la huella de cada rampa
+// que toca un piso. generateAsphalt se ejecuta antes de que loadMap rellene
+// `ramps`, así que aquí se vuelve a leer la sección 6 del código del mapa.
+function collectRampFootprints(){
+	var rects = [];
+	var rampdataRaw = document.getElementById("trackcode").innerHTML.trim().split("|")[5];
+	if(!(rampdataRaw && rampdataRaw.trim())) return rects;
+	var tokens = rampdataRaw.trim().split(" ");
+	for(var i = 0; i < tokens.length; i++){
+		if(tokens[i] == "") continue;
+		var tok = tokens[i];
+		var rFrom = 0, rTo = 1;
+		var atI = tok.indexOf("@");
+		if(atI >= 0){
+			var fl = tok.substring(atI + 1);
+			var dash = fl.indexOf("-");
+			if(dash >= 0){
+				rFrom = parseInt(fl.substring(0, dash)) || 0;
+				rTo = parseInt(fl.substring(dash + 1)) || 0;
+				tok = tok.substring(0, atI);
+			}
+		}
+		var pts = tok.split("/");
+		if(pts.length < 2) continue;
+		var a = pts[0].split(","), b = pts[1].split(",");
+		if(a.length < 2 || b.length < 2) continue;
+		var ax = -parseInt(a[0]) * mapscale, az = parseInt(a[1]) * mapscale;
+		var bx = -parseInt(b[0]) * mapscale, bz = parseInt(b[1]) * mapscale;
+		rects.push({
+			x0: Math.min(ax, bx), x1: Math.max(ax, bx),
+			z0: Math.min(az, bz), z1: Math.max(az, bz),
+			from: rFrom, to: rTo
+		});
+	}
+	return rects;
+}
+
+// Reduce el ancho de banda de una calzada y su extensión en los extremos para
+// que no invadan la huella de una rampa cercana al mismo piso.
+function clampBandToRamps(road, ux, uz, len, bandHalf, rampRects){
+	var nx = -uz, nz = ux;
+	var latMin = Infinity, capMin = Infinity;
+	for(var r = 0; r < rampRects.length; r++){
+		var rr = rampRects[r];
+		// Solo rampas que tocan el piso de esta calzada
+		if(rr.from > road.level || rr.to < road.level) continue;
+		var latA = (rr.x0 - road.x1) * nx + (rr.z0 - road.z1) * nz;
+		var latB = (rr.x1 - road.x1) * nx + (rr.z1 - road.z1) * nz;
+		var latLo = Math.min(latA, latB), latHi = Math.max(latA, latB);
+		var axA = (rr.x0 - road.x1) * ux + (rr.z0 - road.z1) * uz;
+		var axB = (rr.x1 - road.x1) * ux + (rr.z1 - road.z1) * uz;
+		var axLo = Math.min(axA, axB), axHi = Math.max(axA, axB);
+		if(axHi < 0 || axLo > len){
+			// El rampa está más allá de un extremo: limita la extensión del casquete
+			capMin = Math.min(capMin, axLo > len ? axLo : -axHi);
+		}else if(latLo > bandHalf){
+			// El rampa está a un lado de la calzada: limita la anchura de banda
+			latMin = Math.min(latMin, latLo);
+		}else if(latHi < -bandHalf){
+			latMin = Math.min(latMin, -latHi);
+		}
+		// si la huella cruza por encima del eje de la calzada, no se acota
+	}
+	if(latMin < Infinity) bandHalf = Math.max(1.5, Math.min(bandHalf, latMin - 1));
+	if(capMin < Infinity) bandHalf = Math.max(1.5, Math.min(bandHalf, capMin - 1));
+	return bandHalf;
+}
+
 function generateAsphalt(){
 	var tcode = document.getElementById("trackcode");
 	var racedata = tcode.innerHTML.trim().split("|")[0].trim().split(" ");
+	var rampRects = collectRampFootprints();
+	var RAMP_MARGIN = 2; // margen de hierba alrededor de las rampas
 	var segs = [];
+	var allRoadSegs = [];
+	var ROAD_HALF = Math.max(6, mapscale * 1.6); // radio de cobertura de los tramos y sus uniones
+	var asphaltMat = new THREE.MeshLambertMaterial({color: new THREE.Color(0x222222)});
 	for(var i = 0; i < racedata.length; i++){
 		if(racedata[i] == "") continue;
 		var tok = racedata[i];
@@ -1292,15 +1449,151 @@ function generateAsphalt(){
 			lvl = parseInt(tok.substring(at + 1)) || 0;
 			tok = tok.substring(0, at);
 		}
-		if(lvl != 0) continue; // solo muros de suelo
 		var pts = tok.split("/");
 		if(pts.length < 2) continue;
 		var a = pts[0].split(","), b = pts[1].split(",");
 		if(a.length < 2 || b.length < 2) continue;
-		segs.push({
+		var roadSeg = {
 			x1: -parseInt(a[0]) * mapscale, z1: parseInt(a[1]) * mapscale,
-			x2: -parseInt(b[0]) * mapscale, z2: parseInt(b[1]) * mapscale
+			x2: -parseInt(b[0]) * mapscale, z2: parseInt(b[1]) * mapscale,
+			level: lvl
+		};
+		allRoadSegs.push(roadSeg);
+		if(lvl == 0) segs.push(roadSeg);
+	}
+	// Bandas de asfalto bajo cada tramo: cubren la calzada sin invadir rampas ni
+	// otras zonas. El radio se limita al espacio real hasta los muros vecinos.
+	for(var i = 0; i < allRoadSegs.length; i++){
+		var road = allRoadSegs[i];
+		var dx = road.x2 - road.x1, dz = road.z2 - road.z1;
+		var len = Math.sqrt(dx * dx + dz * dz);
+		if(len < 0.1) continue;
+		var ux = dx / len, uz = dz / len;
+		var bandHalf = ROAD_HALF;
+		// Mide la distancia real al muro más cercano que corra a un lado del tramo:
+		// así la banda no se mete en carriles vecinos ni tapa rampas próximas.
+		for(var j = 0; j < allRoadSegs.length; j++){
+			if(j == i || allRoadSegs[j].level != road.level) continue;
+			var r2 = allRoadSegs[j];
+			var bdx = r2.x2 - r2.x1, bdz = r2.z2 - r2.z1;
+			var blen = Math.sqrt(bdx * bdx + bdz * bdz);
+			if(blen < 0.1 || Math.abs((bdx * ux + bdz * uz) / blen) < 0.985) continue;
+			var lateral = (r2.x1 - road.x1) * (-uz) + (r2.z1 - road.z1) * ux;
+			if(Math.abs(lateral) < 1.2) continue;
+			var bStart = (r2.x1 - road.x1) * ux + (r2.z1 - road.z1) * uz;
+			var bEnd = (r2.x2 - road.x1) * ux + (r2.z2 - road.x1) * uz;
+			if(Math.max(bStart, bEnd) < 0 || Math.min(bStart, bEnd) > len) continue;
+			bandHalf = Math.min(bandHalf, Math.abs(lateral) / 2);
+		}
+		// Que la banda tampoco llegue a tapar rampas próximas al mismo piso
+		bandHalf = clampBandToRamps(road, ux, uz, len, Math.max(bandHalf, 1.5), rampRects);
+		var coverage = new THREE.Mesh(
+			new THREE.BoxBufferGeometry(len + bandHalf, 0.05, bandHalf * 2),
+			asphaltMat
+		);
+		coverage.position.set((road.x1 + road.x2) / 2, road.level * LEVEL_HEIGHT + (road.level > 0 ? -0.025 : 0.065), (road.z1 + road.z2) / 2);
+		coverage.rotation.y = Math.atan2(-dz, dx);
+		coverage.receiveShadow = true;
+		coverage.level = road.level;
+		elevGroup.add(coverage);
+		if(road.level > 0)
+			registerFloor(road.level, coverage.position.x, coverage.position.z, ux, uz, (len + bandHalf) / 2, -uz, ux, bandHalf);
+	}
+	// Extensiones rectangulares en los extremos de cada tramo (mitad de su ancho
+	// a lo largo del eje): sellan los encuentros en ángulo sin invadir zona ajena.
+	for(var i = 0; i < allRoadSegs.length; i++){
+		var road = allRoadSegs[i];
+		var dx = road.x2 - road.x1, dz = road.z2 - road.z1;
+		var len = Math.sqrt(dx * dx + dz * dz);
+		if(len < 0.1) continue;
+		var ux = dx / len, uz = dz / len;
+		var roadBandHalf = ROAD_HALF;
+		for(var j = 0; j < allRoadSegs.length; j++){
+			if(j == i || allRoadSegs[j].level != road.level) continue;
+			var r2 = allRoadSegs[j];
+			var bdx = r2.x2 - r2.x1, bdz = r2.z2 - r2.z1;
+			var blen = Math.sqrt(bdx * bdx + bdz * bdz);
+			if(blen < 0.1 || Math.abs((bdx * ux + bdz * uz) / blen) < 0.985) continue;
+			var lateral = (r2.x1 - road.x1) * (-uz) + (r2.z1 - road.z1) * ux;
+			if(Math.abs(lateral) < 1.2) continue;
+			var bs = (r2.x1 - road.x1) * ux + (r2.z1 - road.z1) * uz;
+			var be = (r2.x2 - road.x1) * ux + (r2.z2 - road.x1) * uz;
+			if(Math.max(bs, be) < 0 || Math.min(bs, be) > len) continue;
+			roadBandHalf = Math.min(roadBandHalf, Math.abs(lateral) / 2);
+		}
+		roadBandHalf = clampBandToRamps(road, ux, uz, len, Math.max(roadBandHalf, 1.5), rampRects);
+		var capY = road.level * LEVEL_HEIGHT + (road.level > 0 ? 0.002 : 0.092);
+		[[road.x1, road.z1], [road.x2, road.z2]].forEach(function(point, endIdx){
+			var capRect = new THREE.Mesh(
+				new THREE.BoxBufferGeometry(roadBandHalf * 2, 0.05, roadBandHalf * 2),
+				asphaltMat
+			);
+			var inward = endIdx == 0 ? ux : -ux;
+			capRect.position.set(point[0] + inward * roadBandHalf / 2, capY, point[1] + inward * roadBandHalf / 2);
+			capRect.rotation.y = Math.atan2(-dz, dx);
+			capRect.receiveShadow = true;
+			capRect.level = road.level;
+			elevGroup.add(capRect);
+			if(road.level > 0)
+				registerFloor(road.level, capRect.position.x, capRect.position.z, ux, uz, roadBandHalf, -uz, ux, roadBandHalf);
 		});
+	}
+	// Completa la calzada entre pares de muros paralelos del mismo nivel.
+	// Los rectángulos de borde y las uniones circulares anteriores cubren los
+	// extremos; este paño elimina las franjas de hierba en medio del carril.
+	var MAX_ROAD_GAP = Math.max(20, mapscale * 8);
+	for(var i = 0; i < allRoadSegs.length; i++){
+		var roadA = allRoadSegs[i];
+		var adx = roadA.x2 - roadA.x1, adz = roadA.z2 - roadA.z1;
+		var aLength = Math.sqrt(adx * adx + adz * adz);
+		if(aLength < 0.1) continue;
+		var ux = adx / aLength, uz = adz / aLength;
+		var nx = -uz, nz = ux;
+		for(var j = i + 1; j < allRoadSegs.length; j++){
+			var roadB = allRoadSegs[j];
+			if(roadA.level != roadB.level) continue;
+			var bdx = roadB.x2 - roadB.x1, bdz = roadB.z2 - roadB.z1;
+			var bLength = Math.sqrt(bdx * bdx + bdz * bdz);
+			if(bLength < 0.1 || Math.abs((bdx * ux + bdz * uz) / bLength) < 0.985) continue;
+			var lateral = (roadB.x1 - roadA.x1) * nx + (roadB.z1 - roadA.z1) * nz;
+			if(Math.abs(lateral) < 1.5 || Math.abs(lateral) > MAX_ROAD_GAP) continue;
+			var bStart = (roadB.x1 - roadA.x1) * ux + (roadB.z1 - roadA.z1) * uz;
+			var bEnd = (roadB.x2 - roadA.x1) * ux + (roadB.z2 - roadA.z1) * uz;
+			var overlapStart = Math.max(0, Math.min(bStart, bEnd));
+			var overlapEnd = Math.min(aLength, Math.max(bStart, bEnd));
+			if(overlapEnd - overlapStart < 0.5) continue;
+			var middle = (overlapStart + overlapEnd) / 2;
+			var coverWidth = Math.abs(lateral) + 0.3;
+			var cx = roadA.x1 + ux * middle + nx * lateral / 2;
+			var cz = roadA.z1 + uz * middle + nz * lateral / 2;
+			var exHalf = (overlapEnd - overlapStart + 0.3) / 2, ezHalf = coverWidth / 2;
+			// No pavar el corredor si cruzaría la huella de una rampa del piso
+			var crossesRamp = false;
+			for(var rr = 0; rr < rampRects.length && !crossesRamp; rr++){
+				var r3 = rampRects[rr];
+				if(r3.from > roadA.level || r3.to < roadA.level) continue;
+				if(cx + exHalf > r3.x0 - RAMP_MARGIN && cx - exHalf < r3.x1 + RAMP_MARGIN &&
+				   cz + ezHalf > r3.z0 - RAMP_MARGIN && cz - ezHalf < r3.z1 + RAMP_MARGIN)
+					crossesRamp = true;
+			}
+			if(crossesRamp) continue;
+			var corridor = new THREE.Mesh(
+				new THREE.BoxBufferGeometry(overlapEnd - overlapStart + 0.3, 0.05, coverWidth),
+				asphaltMat
+			);
+			corridor.position.set(
+				cx,
+				roadA.level * LEVEL_HEIGHT + (roadA.level > 0 ? -0.025 : 0.065),
+				cz
+			);
+			corridor.rotation.y = Math.atan2(-uz, ux);
+			corridor.receiveShadow = true;
+			corridor.level = roadA.level;
+			corridor.isRoadCorridor = true;
+			elevGroup.add(corridor);
+			if(roadA.level > 0)
+				registerFloor(roadA.level, corridor.position.x, corridor.position.z, ux, uz, (overlapEnd - overlapStart + 0.3) / 2, nx, nz, coverWidth / 2);
+		}
 	}
 	if(segs.length < 3) return;
 	var minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
@@ -1320,8 +1613,8 @@ function generateAsphalt(){
 	var W = gx1 - gx0 + 1, H = gz1 - gz0 + 1;
 	// distancia mínima de cada celda a los muros (y celda de muro)
 	var WALL_HALF = 0.3 / 2 + 0.35;
-	var ROAD_HALF = 6; // mitad de la anchura de la carretera
 	var dmin = [];
+
 	for(var x = 0; x < W; x++){
 		dmin[x] = [];
 		for(var z = 0; z < H; z++){
@@ -1331,10 +1624,27 @@ function generateAsphalt(){
 				var s = segs[i];
 				d = Math.min(d, distToSeg2(cxw, czw, s.x1, s.z1, s.x2, s.z2));
 			}
+			// Las celdas dentro de la huella de una rampa (con margen) no se pavimentan:
+			// así el relleno interior nunca tapa las rampas del circuito.
+			for(var rr = 0; rr < rampRects.length; rr++){
+				var r3 = rampRects[rr];
+				if(r3.from > 0 && r3.to > 0) continue; // solo rampas que tocan el suelo
+				if(cxw > r3.x0 - RAMP_MARGIN && cxw < r3.x1 + RAMP_MARGIN &&
+				   czw > r3.z0 - RAMP_MARGIN && czw < r3.z1 + RAMP_MARGIN){
+					d = 0;
+					break;
+				}
+			}
 			dmin[x][z] = d;
 		}
 	}
 	// relleno por inundación desde el borde: lo alcanzable es "fuera"
+	var maxDist = 0, minDist = Infinity;
+	for(var z = 0; z < H; z++) for(var x = 0; x < W; x++){
+		if(dmin[x][z] < minDist) minDist = dmin[x][z];
+		if(dmin[x][z] > maxDist) maxDist = dmin[x][z];
+	}
+	var coverCells = [];
 	var out = [];
 	for(var x = 0; x < W; x++){ out[x] = []; for(var z = 0; z < H; z++) out[x][z] = false; }
 	var stack = [];
@@ -1354,14 +1664,14 @@ function generateAsphalt(){
 		if(z > 0 && dmin[x][z-1] >= WALL_HALF && !out[x][z-1]){ out[x][z-1] = true; stack.push([x, z-1]); }
 		if(z < H-1 && dmin[x][z+1] >= WALL_HALF && !out[x][z+1]){ out[x][z+1] = true; stack.push([x, z+1]); }
 	}
-	// asfalto: interior (no muro, no fuera) y cerca de un muro (la pista)
-	var asphaltMat = new THREE.MeshLambertMaterial({color: new THREE.Color(0x222222)});
+	// Asfalto interior de circuitos cerrados: completa las islas encerradas
+	// entre muros. Las bandas continuas anteriores cubren además las pistas abiertas.
 	for(var z = 0; z < H; z++){
 		var x = 0;
 		while(x < W){
-			if(dmin[x][z] < WALL_HALF || out[x][z] || dmin[x][z] >= ROAD_HALF){ x++; continue; }
+			if(dmin[x][z] < WALL_HALF || out[x][z]){ x++; continue; }
 			var x0 = x;
-			while(x < W && dmin[x][z] >= WALL_HALF && !out[x][z] && dmin[x][z] < ROAD_HALF) x++;
+			while(x < W && dmin[x][z] >= WALL_HALF && !out[x][z]) x++;
 			var x1 = x - 1;
 			var w = (x1 - x0 + 1) * CELL;
 			// profundidad exacta CELL: un solape de 0.05 entre filas adyacentes causaba z-fighting
@@ -1374,6 +1684,7 @@ function generateAsphalt(){
 			elevGroup.add(box);
 		}
 	}
+
 }
 
 function loadMap(){
@@ -1662,28 +1973,33 @@ function loadMap(){
 			var rampMesh = buildRampMesh(ra, rb, rFrom, rTo);
 			if(rampMesh)
 				elevGroup.add(rampMesh);
+			var rampGuard = buildRampGuardMesh(ra, rb, rFrom, rTo);
+			if(rampGuard)
+				map.add(rampGuard);
 		}
 	}
 	scene.add(elevGroup);
 
 	trees = new THREE.Object3D();
-	var tree = new THREE.Mesh(
-		new THREE.CylinderBufferGeometry(0, 4, 15),
-		new THREE.MeshLambertMaterial({color: new THREE.Color("#1bad2c")})
-	);
-	var treedata = document.getElementById("trackcode").innerHTML.trim().split("|")[2].trim().split(" ");
-	for(var i = 0; i < treedata.length; i++){
-		if(treedata[i] == "")
-			continue;
-		var t = tree.clone();
-		t.position.set(-parseInt(treedata[i].split(",")[0]) * mapscale, 0, parseInt(treedata[i].split(",")[1]) * mapscale);
-		var s = Math.random() + 1;
-		t.scale.set(s, s, s);
-		t.castShadow = true;
-		t.receiveShadow = true;
-		trees.add(t);
+	if(!TRACK_PREVIEW){
+		var tree = new THREE.Mesh(
+			new THREE.CylinderBufferGeometry(0, 4, 15),
+			new THREE.MeshLambertMaterial({color: new THREE.Color("#1bad2c")})
+		);
+		var treedata = document.getElementById("trackcode").innerHTML.trim().split("|")[2].trim().split(" ");
+		for(var i = 0; i < treedata.length; i++){
+			if(treedata[i] == "")
+				continue;
+			var t = tree.clone();
+			t.position.set(-parseInt(treedata[i].split(",")[0]) * mapscale, 0, parseInt(treedata[i].split(",")[1]) * mapscale);
+			var s = Math.random() + 1;
+			t.scale.set(s, s, s);
+			t.castShadow = true;
+			t.receiveShadow = true;
+			trees.add(t);
+		}
+		scene.add(trees);
 	}
-	scene.add(trees);
 
 	signs = new THREE.Object3D();
 	var sign = new THREE.Mesh(
@@ -1709,8 +2025,15 @@ function loadMap(){
 	for(var i = 0; i < startdata.length; i++){
 		if(startdata[i] == "")
 			continue;
-		var point1 = new THREE.Vector2(parseInt(startdata[i].split("/")[0].split(",")[0]), parseInt(startdata[i].split("/")[0].split(",")[1]));
-		var point2 = new THREE.Vector2(parseInt(startdata[i].split("/")[1].split(",")[0]), parseInt(startdata[i].split("/")[1].split(",")[1]));
+		var startToken = startdata[i];
+		var startLevel = 0;
+		var startAt = startToken.indexOf("@");
+		if(startAt >= 0){
+			startLevel = parseInt(startToken.substring(startAt + 1)) || 0;
+			startToken = startToken.substring(0, startAt);
+		}
+		var point1 = new THREE.Vector2(parseInt(startToken.split("/")[0].split(",")[0]), parseInt(startToken.split("/")[0].split(",")[1]));
+		var point2 = new THREE.Vector2(parseInt(startToken.split("/")[1].split(",")[0]), parseInt(startToken.split("/")[1].split(",")[1]));
 		var wall = new THREE.Mesh(
 			new THREE.BoxBufferGeometry(point1.distanceTo(point2) * mapscale, 0.1, 1),
 			new THREE.MeshLambertMaterial({color: new THREE.Color(i == 0 ? "#2580db" : "#db2525")})
@@ -1719,8 +2042,10 @@ function loadMap(){
 		// Línea elevada a 0.06 para que su cara superior (0.11) quede por encima
 		// de la del asfalto (0.05): antes coincidían exactamente y provocaban
 		// z-fighting (la meta y los checkpoints parpadeaban / se glitcheaban).
-		wall.position.set(-(point1.x + point2.x) / 2 * mapscale, 0.06, (point1.y + point2.y) / 2 * mapscale);
+		wall.position.set(-(point1.x + point2.x) / 2 * mapscale, startLevel * LEVEL_HEIGHT + 0.06, (point1.y + point2.y) / 2 * mapscale);
 		wall.rotation.set(0, angle, 0, "YXZ");
+		wall.level = startLevel;
+		wall.isCheckpointLine = true;
 		var plane = new THREE.Plane(new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), angle));
 		wall.plane = plane;
 		wall.width = point1.distanceTo(point2) * mapscale;
@@ -1730,37 +2055,40 @@ function loadMap(){
 	}
 	scene.add(startc);
 
+	// En la vista previa del editor solo se ve el circuito: sin hierba verde,
+	// sin montañas y sin entorno. Dentro del juego normal se crean igual que antes.
 	main = new THREE.Object3D();
-
-	var stripes = new THREE.TextureLoader().load("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAACCAYAAACZgbYnAAAAEklEQVQYV2NgYGD4z/D/////AA/6BPwHejn9AAAAAElFTkSuQmCC");
-	stripes.magFilter = THREE.NearestFilter;
-	stripes.wrapS = THREE.RepeatWrapping;
-	stripes.wrapT = THREE.RepeatWrapping;
-	stripes.repeat.set(100, 100);
-	var grassTex = makeGrassTexture();
-	var groundMat = grassTex
-		? new THREE.MeshLambertMaterial({color: new THREE.Color(0xffffff), map: grassTex})
-		: new THREE.MeshLambertMaterial({color: new THREE.Color(0x57c115), emissive: new THREE.Color(0x0f0f0f), emissiveMap: stripes});
-	var ground = new THREE.Mesh(
-		new THREE.PlaneBufferGeometry(1000, 1000),
-		groundMat
-	);
-	ground.rotation.set(-Math.PI / 2, 0, 0);
-	ground.receiveShadow = true;
-	main.add(ground);
-
-	for(var i = 0; i < 100; i++){
-		var cube = new THREE.Mesh(
-			new THREE.BoxBufferGeometry(100, 100, 100),
-			new THREE.MeshLambertMaterial({color: new THREE.Color("#888"), side: THREE.DoubleSide})
+	if(!TRACK_PREVIEW){
+		var stripes = new THREE.TextureLoader().load("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAACCAYAAACZgbYnAAAAEklEQVQYV2NgYGD4z/D/////AA/6BPwHejn9AAAAAElFTkSuQmCC");
+		stripes.magFilter = THREE.NearestFilter;
+		stripes.wrapS = THREE.RepeatWrapping;
+		stripes.wrapT = THREE.RepeatWrapping;
+		stripes.repeat.set(100, 100);
+		var grassTex = makeGrassTexture();
+		var groundMat = grassTex
+			? new THREE.MeshLambertMaterial({color: new THREE.Color(0xffffff), map: grassTex})
+			: new THREE.MeshLambertMaterial({color: new THREE.Color(0x57c115), emissive: new THREE.Color(0x0f0f0f), emissiveMap: stripes});
+		var ground = new THREE.Mesh(
+			new THREE.PlaneBufferGeometry(1000, 1000),
+			groundMat
 		);
-		var dist = Math.random() * MOUNTAIN_DIST + MOUNTAIN_DIST;
-		var dir = Math.random() * Math.PI * 2;
-		cube.position.set(dist * Math.sin(dir), 0, dist * Math.cos(dir));
-		cube.rotation.set(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random() * Math.PI * 2);
-		main.add(cube);
+		ground.rotation.set(-Math.PI / 2, 0, 0);
+		ground.receiveShadow = true;
+		main.add(ground);
+
+		for(var i = 0; i < 100; i++){
+			var cube = new THREE.Mesh(
+				new THREE.BoxBufferGeometry(100, 100, 100),
+				new THREE.MeshLambertMaterial({color: new THREE.Color("#888"), side: THREE.DoubleSide})
+			);
+			var dist = Math.random() * MOUNTAIN_DIST + MOUNTAIN_DIST;
+			var dir = Math.random() * Math.PI * 2;
+			cube.position.set(dist * Math.sin(dir), 0, dist * Math.cos(dir));
+			cube.rotation.set(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random() * Math.PI * 2);
+			main.add(cube);
+		}
+		scene.add(main);
 	}
-	scene.add(main);
 
 	return varsCode;
 }
@@ -1998,6 +2326,107 @@ function enterResultsMode(){
 	resultsOverlay.style.display = "flex";
 }
 
+// ---- Cámara de la vista previa: órbita automática + arrastre manual -----
+// gira sola; al arrastrar con el ratón se detiene y la cámara sigue el cursor a
+// la velocidad que mueva el usuario; tras 5 s sin interacción vuelve a girar.
+var previewYaw = 0, previewDragging = false, previewLastDrag = 0;
+var previewDragPrevX = 0;
+
+function wirePreviewOrbit(){
+	if(!TRACK_PREVIEW || !element) return;
+	element.style.cursor = "grab";
+	function startDrag(clientX){
+		previewDragging = true;
+		previewDragPrevX = clientX;
+		previewLastDrag = Date.now();
+		element.style.cursor = "grabbing";
+	}
+	function moveDrag(clientX){
+		if(!previewDragging) return;
+		previewYaw -= (clientX - previewDragPrevX) * 0.008;
+		previewDragPrevX = clientX;
+		previewLastDrag = Date.now();
+	}
+	function endDrag(){
+		if(!previewDragging) return;
+		previewDragging = false;
+		previewLastDrag = Date.now();
+		element.style.cursor = "grab";
+	}
+	element.addEventListener("mousedown", function(e){ startDrag(e.clientX); });
+	window.addEventListener("mousemove", function(e){ moveDrag(e.clientX); });
+	window.addEventListener("mouseup", endDrag);
+	element.addEventListener("touchstart", function(e){
+		if(e.touches.length == 1) startDrag(e.touches[0].clientX);
+	}, {passive: true});
+	element.addEventListener("touchmove", function(e){
+		if(e.touches.length == 1) moveDrag(e.touches[0].clientX);
+	}, {passive: true});
+	element.addEventListener("touchend", endDrag);
+	element.addEventListener("touchcancel", endDrag);
+}
+
+function setEditorTrackPreview(trackCode){
+	if(!TRACK_PREVIEW || typeof trackCode != "string") return false;
+	var trackEl = document.getElementById("trackcode");
+	if(!trackEl) return false;
+	trackEl.innerHTML = trackCode;
+	if(joined){
+		deleteMap();
+		eval(loadMap());
+		updateTrackPreviewCamera();
+	}else{
+		join();
+		var foreEl = document.getElementById("fore");
+		if(foreEl) foreEl.style.display = "none";
+		if(introEl && introEl.parentNode) introEl.parentNode.removeChild(introEl);
+		if(element.parentNode != document.body) document.body.appendChild(element);
+		element.style.position = "fixed";
+		element.style.left = "0";
+		element.style.top = "0";
+		element.style.zIndex = "0";
+		element.style.width = "100vw";
+		element.style.height = "100vh";
+		wirePreviewOrbit();
+		updateTrackPreviewCamera();
+	}
+	return true;
+}
+
+function updateTrackPreviewCamera(){
+	if(!TRACK_PREVIEW || !camera) return;
+	var bounds = new THREE.Box3();
+	bounds.makeEmpty();
+	[map, elevGroup, startc, signs].forEach(function(group){
+		if(!group) return;
+		group.updateMatrixWorld(true);
+		group.traverse(function(object){
+			if(!object.geometry || object.isMesh && object.parent === trees) return;
+			if(!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+			var box = object.geometry.boundingBox;
+			if(!box) return;
+			for(var x = 0; x < 2; x++) for(var y = 0; y < 2; y++) for(var z = 0; z < 2; z++){
+				bounds.expandByPoint(new THREE.Vector3(
+					x ? box.max.x : box.min.x,
+					y ? box.max.y : box.min.y,
+					z ? box.max.z : box.min.z
+				).applyMatrix4(object.matrixWorld));
+			}
+		});
+	});
+	if(bounds.isEmpty()) bounds.set(new THREE.Vector3(-20, 0, -20), new THREE.Vector3(20, 0, 20));
+	// Incluye geometría de carretera, paredes, rampas y checkpoints, pero no los
+	// árboles ni los pilares decorativos: así centra el circuito, no el spawn ni el entorno.
+	bounds.getCenter(previewCenter);
+	var size = bounds.getSize(new THREE.Vector3());
+	var fov = THREE.Math.degToRad(camera.fov);
+	var horizontalFov = 2 * Math.atan(Math.tan(fov / 2) * camera.aspect);
+	var limitingFov = Math.max(0.1, Math.min(fov, horizontalFov));
+	previewRadius = Math.max(20, size.length() * 0.58 / Math.sin(limitingFov / 2));
+	camera.far = Math.max(1000, previewRadius * 8);
+	camera.updateProjectionMatrix();
+}
+
 function join(){
 	if(map) deleteMap();
 	eval(loadMap());
@@ -2156,7 +2585,15 @@ function join(){
 							continue;
 						var gp = new THREE.Vector2(-play.data.x / mapscale, play.data.y / mapscale);
 						var t = rampAxisT(gp, rp.a, rp.b);
-						targetH = rp.from + (rp.to - rp.from) * t;
+						var rampH = rp.from + (rp.to - rp.from) * t;
+						// Contacto real con la superficie: para montarse en la rampa el
+						// coche debe estar a la altura de su superficie (o muy cerca).
+						// Antes bastaba con estar dentro del rect\u00e1ngulo en planta, lo que
+						// teletransportaba hacia arriba al coche que circulaba por una
+						// carretera situada bajo la rampa.
+						if(Math.abs(rampH - play.data.h) > RAMP_CONTACT)
+							continue;
+						targetH = rampH;
 						onRamp = true;
 						break;
 					}
@@ -2222,10 +2659,11 @@ function join(){
 					// carPitch (no en play.data) para no sincronizarlo por Firebase.
 					var pitchTarget = 0;
 					var fwdStep = 2; // unidades de mundo por delante
-					var hNow = rampHeightAt(play.data.x, play.data.y);
+					var hNow = rampHeightAt(play.data.x, play.data.y, play.data.h);
 					var hAhead = rampHeightAt(
 						play.data.x + Math.sin(play.data.dir) * fwdStep,
-						play.data.y + Math.cos(play.data.dir) * fwdStep
+						play.data.y + Math.cos(play.data.dir) * fwdStep,
+						play.data.h
 					);
 					if(hNow != null && hAhead != null)
 						pitchTarget = Math.atan2((hAhead - hNow) * LEVEL_HEIGHT, fwdStep);
@@ -2260,7 +2698,13 @@ function join(){
 
 					for(var w in map.children){
 						var wall = map.children[w];
-						if(wall.level != Math.floor(play.data.h + 0.05)) continue;
+						if(wall.isRampGuard){
+							var gx = wall.p2.x - wall.p1.x, gz = wall.p2.y - wall.p1.y;
+							var glen2 = gx * gx + gz * gz;
+							var gt = glen2 ? Math.max(0, Math.min(1, ((play.model.position.x - wall.p1.x) * gx + (play.model.position.z - wall.p1.y) * gz) / glen2)) : 0;
+							var guardY = wall.guardY1 + (wall.guardY2 - wall.guardY1) * gt;
+							if(Math.abs(play.model.position.y - guardY) > 1.35) continue;
+						}else if(wall.level != Math.floor(play.data.h + 0.05)) continue;
 						var posi = new THREE.Vector2(play.data.x, play.data.y);
 						if(Math.abs(wall.plane.distanceToPoint(play.model.position.clone().sub(wall.position))) < WALL_SIZE){
 							// Distancia 2D (ignorando Y): con pistas multinivel el coche puede estar por debajo/encima
@@ -2316,7 +2760,7 @@ function join(){
 					for(var i in startc.children){
 						var cp = startc.children[i];
 						var idx = parseInt(i);
-						if(Math.round(play.data.h) != 0) break; // Los checkpoints solo cuentan en nivel 0
+						if(Math.round(play.data.h) != (cp.level || 0)) continue; // La salida/checkpoint cuenta solo en su piso
 						if(Math.abs(cp.plane.distanceToPoint(play.model.position.clone().sub(cp.position))) < 1){
 							if(cp.position.clone().distanceTo(play.model.position) < cp.width / 2 + 1){
 								var totalCheckpoints = startc.children.length - 1;
@@ -2331,12 +2775,11 @@ function join(){
 									if(play.data.checkpoint == idx - 1){
 										play.data.checkpoint = idx;
 									}
-								}
-							}
+							}								}
 						}
 					}
 
-					if(play.data.lap >= LAPS && !play.data.finishedPlace && p == myId){
+						if(play.data.lap >= LAPS && !play.data.finishedPlace && p == myId){
 						if(soloMode == "crono"){
 							// Solo cronometraje: just record our own finish locally.
 							me.data.finishedPlace = 1;
@@ -2457,6 +2900,19 @@ function join(){
 				}
 			}
 			if(soloMode != "entreno") updateLeaderboard();
+		}else if(TRACK_PREVIEW){
+			// Giro automático: se detiene cuando el usuario arrastra y se reanuda
+			// 5 s después de la última interacción. Durante el arrastre, la cámara
+			// gira exactamente a la velocidad del ratón.
+			var now = Date.now();
+			if(!previewDragging && now - previewLastDrag > 5000)
+				previewYaw += 0.0012; // mismo giro automático de antes (x*0.12 con x+=0.01)
+			camera.position.set(
+				previewCenter.x + previewRadius * Math.sin(previewYaw),
+				previewCenter.y + previewRadius * 0.42,
+				previewCenter.z + previewRadius * Math.cos(previewYaw)
+			);
+			camera.lookAt(previewCenter);
 		}else if(!paused){
 			camera.position.set(50 * Math.sin(x), 20, 50 * Math.cos(x));
 			camera.lookAt(player.position);
@@ -2506,7 +2962,11 @@ function join(){
 			renderer.setSize(window.innerWidth, window.innerHeight);
 		}
 		orientCamera();
-		setTimeout(orientCamera, 0);
+		if(TRACK_PREVIEW) updateTrackPreviewCamera();
+		setTimeout(function(){
+			orientCamera();
+			if(TRACK_PREVIEW) updateTrackPreviewCamera();
+		}, 0);
 	}
 }
 codeCheck = function(){

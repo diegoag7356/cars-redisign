@@ -7,8 +7,21 @@ var erase = [];
 var hist = [];
 var capa = 0; // Capa (piso) actual de dibujo: 0 = suelo, 1, 2...
 var pendingRamp = null; // Rect\u00e1ngulo de rampa en curso: {a, b}
-var rampDir = "up";     // Direcci\u00f3n elegida en el di\u00e1logo: 'up' | 'down'
+var rampDir = "up";     // Piso destino elegido en el di\u00e1logo: 'up' | 'down'
 var rampFloor = 1;      // Piso destino elegido en el di\u00e1logo
+var rampSide = "e";     // Hacia dónde sube la rampa en el mapa: 'n'|'s'|'e'|'w'
+
+// ---- Previsualización 3D del juego --------------------------------------
+// La vista usa el propio index.html/script.js del juego dentro de un iframe,
+// no un renderizador aproximado del editor.
+var mode3D = false;
+var previewFrame = null;
+var FLOOR_H = 6;
+var toolStart = {x: 0, y: 0};
+
+function markDirty(){
+	if(mode3D) syncGamePreview();
+}
 
 var mouse = {
 	down: false,
@@ -32,7 +45,7 @@ var height = ca.clientHeight * window.devicePixelRatio;
 var width = ca.clientWidth * window.devicePixelRatio;
 ca.height = height;
 ca.width = width;
-var scale = 10;
+var scale = 40; // Zoom fijo x4: no hay controles para cambiarlo
 var offset = {x: width % scale / 2, y : height % scale / 2}
 var c = ca.getContext("2d");
 c.lineCap = "round";
@@ -163,9 +176,9 @@ function update(){
 		c.lineWidth = 2;
 		c.strokeRect(Math.min(pax, pbx), Math.min(pay, pby), Math.abs(pbx - pax), Math.abs(pby - pay));
 		c.setLineDash([]);
-	}
-	c.translate(-offset.x, -offset.y);
+	}	c.translate(-offset.x, -offset.y);
 }
+
 update();
 
 function select(n){
@@ -178,6 +191,7 @@ function setCapa(n){
 	capa = Math.max(0, Math.min(4, n));
 	var el = document.getElementById("capaval");
 	if(el) el.innerHTML = capa;
+	markDirty(); // el plano de dibujo 3D cambia de altura
 }
 
 function adjCapa(d){
@@ -197,8 +211,23 @@ function openRampDialog(){
 		document.getElementById("rdDown").classList.remove("disabled");
 	}
 	rampFloor = capa + 1;
+	// Dirección de la subida: por defecto la que marca el arrastre (a -> b),
+	// restringida al eje más largo del rectángulo (el juego usa como eje de la
+	// rampa la dimensión dominante, así que el extremo que sube es un final de
+	// ese lado). Coordenadas: +x es derecha, +y es abajo en pantalla.
+	var w = Math.abs(pendingRamp.b.x - pendingRamp.a.x);
+	var h = Math.abs(pendingRamp.b.y - pendingRamp.a.y);
+	if(w >= h)
+		rampSide = pendingRamp.b.x >= pendingRamp.a.x ? "e" : "w";
+	else
+		rampSide = pendingRamp.b.y >= pendingRamp.a.y ? "s" : "n";
 	updateRampDialog();
 	document.getElementById("rampDialog").style.display = "block";
+}
+
+function setRampSide(dir){
+	rampSide = dir;
+	updateRampDialog();
 }
 
 function setRampDir(dir){
@@ -224,6 +253,21 @@ function updateRampDialog(){
 	down.className = "rd-dir" + (rampDir == "down" ? " sel" : "");
 	if(capa == 0)
 		down.classList.add("disabled");
+	// Botones de dirección de la subida: solo habilitados los del eje largo
+	var pw = pendingRamp ? Math.abs(pendingRamp.b.x - pendingRamp.a.x) : 0;
+	var ph = pendingRamp ? Math.abs(pendingRamp.b.y - pendingRamp.a.y) : 0;
+	var horizontal = pw >= ph;
+	var sides = ["n", "s", "e", "w"];
+	for(var i = 0; i < sides.length; i++){
+		var el = document.getElementById("rdSide" + sides[i].toUpperCase());
+		if(!el) continue;
+		var verticalEnabled = !horizontal && (sides[i] == "n" || sides[i] == "s");
+		var horizontalEnabled = horizontal && (sides[i] == "e" || sides[i] == "w");
+		var cls = "rd-dir" + (rampSide == sides[i] ? " sel" : "");
+		if(!verticalEnabled && !horizontalEnabled)
+			cls += " disabled";
+		el.className = cls;
+	}
 	var fv = document.getElementById("rdFloorVal");
 	if(fv) fv.innerHTML = rampFloor;
 	drawRampPreview();
@@ -284,9 +328,34 @@ function acceptRamp(){
 		alert("Arrastra para dibujar el rectángulo de la rampa.");
 		return;
 	}
+	// Esquinas a/b del rectángulo según la dirección de la subida elegida:
+	// el juego calcula la altura proyectando sobre la dimensión dominante de
+	// b-a, así que a debe quedar en el extremo bajo del eje de la subida.
+	var minX = Math.min(pendingRamp.a.x, pendingRamp.b.x), maxX = Math.max(pendingRamp.a.x, pendingRamp.b.x);
+	var minY = Math.min(pendingRamp.a.y, pendingRamp.b.y), maxY = Math.max(pendingRamp.a.y, pendingRamp.b.y);
+	var w = maxX - minX, h = maxY - minY;
+	var hzt = w >= h; // eje de la subida horizontal cuando el lado largo es el X
+	var rA, rB;
+	if(hzt){
+		if(rampSide == "w"){
+			rA = {x: maxX, y: maxY};
+			rB = {x: minX, y: minY};
+		}else{
+			rA = {x: minX, y: minY};
+			rB = {x: maxX, y: maxY};
+		}
+	}else{
+		if(rampSide == "n"){
+			rA = {x: minX, y: maxY};
+			rB = {x: maxX, y: minY};
+		}else{
+			rA = {x: minX, y: minY};
+			rB = {x: maxX, y: maxY};
+		}
+	}
 	ramps.push({
-		a: {x: pendingRamp.a.x, y: pendingRamp.a.y},
-		b: {x: pendingRamp.b.x, y: pendingRamp.b.y},
+		a: rA,
+		b: rB,
 		// level = piso más bajo: así la rampa se ve en el piso al que baja también
 		level: Math.min(capa, rampFloor),
 		from: capa,
@@ -312,87 +381,88 @@ function gridY(x){
 	return Math.round((x * window.devicePixelRatio - offset.y) / scale);
 }
 
+// ---- Herramientas compartidas (editor 2D y modo 3D) --------------------
+// Reciben coordenadas de rejilla, así que el ratón del editor 2D y el
+// raycasting del modo 3D usan exactamente la misma lógica y el mismo undo.
+function startTool(gx, gy){
+	toolStart.x = gx;
+	toolStart.y = gy;
+	if(sel == 0)
+		walls.push({start: {x: gx, y: gy}, end: {x: gx, y: gy}, level: capa});
+	if(sel == 1)
+		start.push({start: {x: gx, y: gy}, end: {x: gx, y: gy}, level: capa});
+	if(sel == 2)
+		trees.push({x: gx, y: gy});
+	if(sel == 3)
+		arrows.push({x: gx, y: gy, angle: 0});
+	if(sel == 4)
+		pendingRamp = {a: {x: gx, y: gy}, b: {x: gx, y: gy}};
+	if(sel == 5)
+		eraseL(gx, gy);
+	markDirty();
+}
+
+function moveTool(gx, gy){
+	if(sel == 0){
+		walls[walls.length - 1].end.x = gx;
+		walls[walls.length - 1].end.y = gy;
+	}
+	if(sel == 1){
+		start[start.length - 1].end.x = gx;
+		start[start.length - 1].end.y = gy;
+	}
+	if(sel == 2){
+		trees.push({x: gx, y: gy});
+		hist.push(sel);
+	}
+	if(sel == 3)
+		arrows[arrows.length - 1].angle = Math.atan2(toolStart.y - gy, toolStart.x - gx);
+	if(sel == 4 && pendingRamp){
+		pendingRamp.b.x = gx;
+		pendingRamp.b.y = gy;
+	}
+	if(sel == 5)
+		eraseL(gx, gy);
+	markDirty();
+}
+
+function endTool(gx, gy){
+	if(sel == 0){
+		walls[walls.length - 1].end.x = gx;
+		walls[walls.length - 1].end.y = gy;
+	}
+	if(sel == 1){
+		start[start.length - 1].end.x = gx;
+		start[start.length - 1].end.y = gy;
+	}
+	if(sel == 2)
+		trees[trees.length - 1] = {x: gx, y: gy};
+	if(sel == 4 && pendingRamp){
+		pendingRamp.b.x = gx;
+		pendingRamp.b.y = gy;
+		// La rampa solo se crea al confirmar en el diálogo
+		openRampDialog();
+	}else if(sel != 5){
+		// La goma registra su propio historial solo cuando borra algo.
+		hist.push(sel);
+	}
+	markDirty();
+}
+
 ca.onmousedown = function(e){
 	mouse.down = true;
 	mouse.cur.x = e.clientX;
 	mouse.cur.y = e.clientY;
 	mouse.start.x = e.clientX;
 	mouse.start.y = e.clientY;
-	if(sel == 0)
-		walls.push({
-			start: {
-				x: gridX(mouse.start.x),
-				y: gridY(mouse.start.y)
-			},
-			end: {
-				x: gridX(mouse.start.x),
-				y: gridY(mouse.start.y)
-			},
-			level: capa
-		});
-	if(sel == 1)
-		start.push({
-			start: {
-				x: gridX(mouse.start.x),
-				y: gridY(mouse.start.y)
-			},
-			end: {
-				x: gridX(mouse.start.x),
-				y: gridY(mouse.start.y)
-			}
-		});
-	if(sel == 2)
-		trees.push({
-			x: gridX(mouse.start.x),
-			y: gridY(mouse.start.y)
-		});
-	if(sel == 3)
-		arrows.push({
-			x: gridX(mouse.start.x),
-			y: gridY(mouse.start.y),
-			angle: 0
-		});
-	if(sel == 4)
-		pendingRamp = {
-			a: {
-				x: gridX(mouse.start.x),
-				y: gridY(mouse.start.y)
-			},
-			b: {
-				x: gridX(mouse.start.x),
-				y: gridY(mouse.start.y)
-			}
-		};
-	if(sel == 5)
-		eraseL(gridX(mouse.cur.x), gridY(mouse.cur.y));
+	startTool(gridX(mouse.start.x), gridY(mouse.start.y));
 }
 
 ca.onmousemove = function(e){
 	mouse.cur.x = e.clientX;
 	mouse.cur.y = e.clientY;
-	if(sel == 0 && mouse.down){
-		walls[walls.length - 1].end.x = gridX(mouse.cur.x);
-		walls[walls.length - 1].end.y = gridY(mouse.cur.y);
-	}
-	if(sel == 1 && mouse.down){
-		start[start.length - 1].end.x = gridX(mouse.cur.x);
-		start[start.length - 1].end.y = gridY(mouse.cur.y);
-	}
-	if(sel == 2 && mouse.down){
-		trees.push({
-			x: gridX(mouse.cur.x),
-			y: gridY(mouse.cur.y)
-		});
-		hist.push(sel);
-	}
-	if(sel == 3 && mouse.down)
-		arrows[arrows.length - 1].angle = Math.atan2(mouse.start.y - mouse.cur.y, mouse.start.x - mouse.cur.x);
-	if(sel == 4 && mouse.down && pendingRamp){
-		pendingRamp.b.x = gridX(mouse.cur.x);
-		pendingRamp.b.y = gridY(mouse.cur.y);
-	}
-	if(sel == 5 && mouse.down)
-		eraseL(gridX(mouse.cur.x), gridY(mouse.cur.y));
+	if(mouse.down)
+		moveTool(gridX(mouse.cur.x), gridY(mouse.cur.y));
 }
 
 ca.onmouseup = function(e){
@@ -401,29 +471,25 @@ ca.onmouseup = function(e){
 	mouse.cur.y = e.clientY;
 	mouse.end.x = e.clientX;
 	mouse.end.y = e.clientY;
-	if(sel == 0){
-		walls[walls.length - 1].end.x = gridX(mouse.end.x);
-		walls[walls.length - 1].end.y = gridY(mouse.end.y);
+	endTool(gridX(mouse.end.x), gridY(mouse.end.y));
+}
+
+function inferEditorCheckpointLevel(a, b){
+	if(!walls.length) return 0;
+	var points = [{x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}];
+	var bestDistance = Infinity, bestLevel = 0;
+	for(var i = 0; i < walls.length; i++){
+		var wall = walls[i];
+		var dx = wall.end.x - wall.start.x, dy = wall.end.y - wall.start.y;
+		var length2 = dx * dx + dy * dy;
+		var t = length2 ? Math.max(0, Math.min(1, ((points[0].x - wall.start.x) * dx + (points[0].y - wall.start.y) * dy) / length2)) : 0;
+		var distance = Math.hypot(points[0].x - (wall.start.x + dx * t), points[0].y - (wall.start.y + dy * t));
+		if(distance < bestDistance){
+			bestDistance = distance;
+			bestLevel = wall.level || 0;
+		}
 	}
-	if(sel == 1){
-		start[start.length - 1].end.x = gridX(mouse.end.x);
-		start[start.length - 1].end.y = gridY(mouse.end.y);
-	}
-	if(sel == 2)
-		trees[trees.length - 1] = {
-			x: gridX(mouse.end.x),
-			
-			y: gridY(mouse.end.y)
-		};
-	if(sel == 4 && pendingRamp){
-		pendingRamp.b.x = gridX(mouse.end.x);
-		pendingRamp.b.y = gridY(mouse.end.y);
-		// La rampa solo se crea al confirmar en el di\u00e1logo
-		openRampDialog();
-	}else{
-		hist.push(sel);
-	}
-	//console.log(hist);
+	return bestDistance <= 8 ? bestLevel : 0;
 }
 
 function imp(){
@@ -470,16 +536,24 @@ function imp(){
 		if(t.length < 2)
 			continue;
 
-		start.push({
-			start: {
-				x: parseInt(t[0].split(",")[0]) + Math.floor(width / scale / 2),
-				y: -parseInt(t[0].split(",")[1]) + Math.floor(height / scale / 2)
-			},
-			end: {
-				x: parseInt(t[1].split(",")[0]) + Math.floor(width / scale / 2),
-				y: -parseInt(t[1].split(",")[1]) + Math.floor(height / scale / 2)
-			}
-		});
+		var startLevel = 0;
+		var startAt = startText[i].indexOf("@");
+		var hasStartLevel = startAt >= 0;
+		if(hasStartLevel){
+			startLevel = parseInt(startText[i].substring(startAt + 1)) || 0;
+			startText[i] = startText[i].substring(0, startAt);
+			t = startText[i].split("/");
+		}
+		var startA = {
+			x: parseInt(t[0].split(",")[0]) + Math.floor(width / scale / 2),
+			y: -parseInt(t[0].split(",")[1]) + Math.floor(height / scale / 2)
+		};
+		var startB = {
+			x: parseInt(t[1].split(",")[0]) + Math.floor(width / scale / 2),
+			y: -parseInt(t[1].split(",")[1]) + Math.floor(height / scale / 2)
+		};
+		if(!hasStartLevel) startLevel = inferEditorCheckpointLevel(startA, startB);
+		start.push({start: startA, end: startB, level: startLevel});
 	}
 
 	trees = [];
@@ -542,6 +616,7 @@ function imp(){
 			});
 		}
 	}
+	markDirty();
 }
 
 // ---- Variables del mapa (se exportan en la \u00faltima secci\u00f3n del c\u00f3digo) ----
@@ -581,6 +656,7 @@ function adjVar(i, dir){
 	v.val = Math.max(v.min, Math.min(v.max, nv));
 	var el = document.getElementById("varval" + i);
 	if(el) el.innerHTML = v.val.toFixed(v.dec);
+	markDirty();
 }
 
 function varsToCode(){
@@ -615,15 +691,9 @@ function toggleVars(){
 	if(arrow) arrow.innerHTML = collapsed ? "&#9660;" : "&#9654;";
 }
 
-// Zoom de la grilla: cambia el tamaño de las celdas en píxeles (scale).
+// El zoom de la grilla es fijo en x4 (scale = 40): no se puede cambiar.
 // Import/export normalizan con Math.floor(width/scale/2), así que las
-// coordenadas del mapa exportado no cambian con el zoom.
-function zoomGrid(dir){
-	scale = Math.max(4, Math.min(40, scale + dir * 4));
-	offset = {x: width % scale / 2, y: height % scale / 2};
-	var zv = document.getElementById("zoomval");
-	if(zv) zv.innerHTML = "x" + (scale / 10).toFixed(1);
-}
+// coordenadas del mapa exportado no cambian aunque se ajuste este valor.
 
 function exp(){
 	var text = "";
@@ -641,7 +711,9 @@ function exp(){
 		text += start[i].start.x - Math.floor(width / scale / 2) + ",";
 		text += -1 * (start[i].start.y - Math.floor(height / scale / 2)) + "/";
 		text += start[i].end.x - Math.floor(width / scale / 2) + ",";
-		text += -1 * (start[i].end.y - Math.floor(height / scale / 2)) + " ";
+		text += -1 * (start[i].end.y - Math.floor(height / scale / 2));
+		if(start[i].level) text += "@" + start[i].level;
+		text += " ";
 	}
 	text += "|";
 	for(var i = 0; i < trees.length; i++){
@@ -666,20 +738,22 @@ function exp(){
 		text += "@" + (ramps[i].from != null ? ramps[i].from : 0) + "-" + (ramps[i].to != null ? ramps[i].to : 1) + " ";
 	}
 	text += "<br/>";
+	if(mode3D) syncGamePreview();
 	var win = window.open();
 	win.document.body.innerHTML = text;
 }
 
 document.body.onkeydown = function(e){
 	if(e.keyCode == 90 && (e.ctrlKey || e.metaKey)){
-		//console.log(hist);
+		if(hist.length == 0) return;
 		e.preventDefault();
 		var a = hist.splice(hist.length - 1, 1)[0];
 		var ar = [walls, start, trees, arrows, ramps, erase][a];
+		if(!ar || ar.length == 0) return;
 		var del = ar.splice(ar.length - 1, 1)[0];
-		if(ar == erase){
+		if(ar == erase && del && del.list)
 			del.list.splice(del.pos, 0, del.ob);
-		}
+		markDirty();
 	}
 }
 function eraseL(x, y){
@@ -749,4 +823,69 @@ function dedupTrees(){
 		
 		poss.push(trees[i]);
 	}
+	markDirty();
+}// ---- Vista previa 3D real del juego -------------------------------------
+// El iframe carga el HTML y el motor reales. En modo preview, script.js toma
+// el trackcode dinámico del editor, omite Firebase/menús y hace una órbita de cámara.
+var previewSyncTimer = null;
+var previewReady = false;
+var previewLoadVersion = 0;
+
+function toggle3D(){
+	mode3D = !mode3D;
+	document.body.classList.toggle("mode3d", mode3D);
+	var btn = document.getElementById("btn3d");
+	if(btn){
+		btn.className = "button" + (mode3D ? " selected" : "");
+		btn.innerHTML = mode3D ? "Volver al editor" : "Vista 3D";
+	}
+	if(mode3D){
+		if(!previewFrame){
+			previewFrame = document.createElement("iframe");
+			previewFrame.id = "gamePreview";
+			previewFrame.title = "Vista previa del circuito en el juego";
+			previewFrame.src = "../index.html?trackPreview=1";
+			previewFrame.addEventListener("load", function(){
+				previewReady = true;
+				syncGamePreview();
+			});
+			document.body.appendChild(previewFrame);
+		}
+		previewFrame.style.display = "block";
+		syncGamePreview();
+	}else if(previewFrame){
+		previewFrame.style.display = "none";
+	}
+}
+
+function currentMapCode(){
+	var ox = Math.floor(width / scale / 2), oy = Math.floor(height / scale / 2);
+	var checkpointLevels = start.map(function(line){
+		return line.level != null ? line.level : inferEditorCheckpointLevel(line.start, line.end);
+	});
+	var wallsText = walls.map(function(w){
+		return (w.start.x - ox) + "," + -(w.start.y - oy) + "/" + (w.end.x - ox) + "," + -(w.end.y - oy) + (w.level ? "@" + w.level : "");
+	}).join(" ");
+	var startsText = start.map(function(line, index){
+		var level = checkpointLevels[index] || 0;
+		return (line.start.x - ox) + "," + -(line.start.y - oy) + "/" + (line.end.x - ox) + "," + -(line.end.y - oy) + (level ? "@" + level : "");
+	}).join(" ");
+	var treesText = trees.map(function(t){ return (t.x - ox) + "," + -(t.y - oy); }).join(" ");
+	var arrowsText = arrows.map(function(a){ return (a.x - ox) + ",3," + -(a.y - oy) + "/" + Math.floor(90 - a.angle * 180 / Math.PI); }).join(" ");
+	var rampText = ramps.map(function(r){
+		return (r.a.x - ox) + "," + -(r.a.y - oy) + "/" + (r.b.x - ox) + "," + -(r.b.y - oy) + "@" + (r.from != null ? r.from : 0) + "-" + (r.to != null ? r.to : 1);
+	}).join(" ");
+	return [wallsText, startsText, treesText, arrowsText, varsToCode(), rampText].join("|");
+}
+
+function syncGamePreview(){
+	if(!mode3D || !previewFrame || !previewReady) return;
+	if(previewSyncTimer) clearTimeout(previewSyncTimer);
+	var version = ++previewLoadVersion;
+	previewSyncTimer = setTimeout(function(){
+		if(!mode3D || !previewFrame || !previewReady || version != previewLoadVersion) return;
+		var previewWindow = previewFrame.contentWindow;
+		if(!previewWindow || !previewWindow.setEditorTrackPreview) return;
+		previewWindow.setEditorTrackPreview(currentMapCode());
+	}, 80);
 }

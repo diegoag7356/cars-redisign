@@ -10,6 +10,46 @@
 	width: 100vw;
 	cursor: crosshair;
 }
+#gamePreview{
+	display: none;
+	position: fixed;
+	inset: 0;
+	z-index: 1;
+	width: 100vw;
+	height: 100vh;
+	border: 0;
+	background: #7fb0ff;
+}
+body.mode3d #c{
+	display: none;
+}
+body.mode3d #vars,
+body.mode3d #rampDialog,
+body.mode3d #center{
+	display: none !important;
+}
+body.mode3d #menu{
+	background: none;
+	border: 0;
+	padding: 0;
+	z-index: 3;
+}
+body.mode3d #menu .button:not(#btn3d){
+	display: none;
+}
+body.mode3d #btn3d{
+	position: fixed;
+	top: 12px;
+	left: auto;
+	right: 12px;
+	width: auto;
+	min-width: 140px;
+	padding: 0 12px;
+	background-color: rgba(0, 0, 0, 0.72);
+}
+#btn3d.selected{
+	background-color: rgba(224, 64, 251, 0.55);
+}
 #menu{
 	position: absolute;
 	background-color: rgba(0, 0, 0, 0.5);
@@ -39,7 +79,18 @@
 	padding: 10px;
 	font-size: 14px;
 	min-width: 240px;
+	/* Sin un ancho máximo, el texto largo de #capahint (max-content) inflaba
+		el panel a ~1000px y cubría el centro de la pantalla, capturando los
+		clics que iban dirigidos al lienzo del editor. */
+	max-width: min(320px, 90vw);
+	box-sizing: border-box;
 	z-index: 2;
+}
+.nivelshint{
+	font-size: 12px;
+	line-height: 1.35;
+	opacity: 0.8;
+	margin: 6px 0;
 }
 .vartitle{
 	font-size: 16px;
@@ -58,14 +109,6 @@
 #varsArrow{
 	font-size: 12px;
 	margin-left: 6px;
-}
-#zoomrow{
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	margin-top: 10px;
-	padding-top: 8px;
-	border-top: 1px solid rgba(255, 255, 255, 0.35);
 }
 .varrow{
 	display: flex;
